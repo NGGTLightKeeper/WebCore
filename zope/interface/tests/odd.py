@@ -62,7 +62,6 @@ This is used for testing support for ExtensionClass in new interfaces.
 
 # class OddClass is an odd meta class
 
-
 class MetaMetaClass(type):
 
     def __getattribute__(cls, name):
@@ -91,19 +90,14 @@ class MetaClass:
                 return v
         raise AttributeError(name)
 
-    def __repr__(self):  # pragma: no cover
-        return f"<odd class {self.__name__} at {hex(id(self))}>"
+    def __repr__(self): # pragma: no cover
+        return "<odd class {} at {}>".format(self.__name__, hex(id(self)))
 
 
-MetaClass = MetaMetaClass(
-    'MetaClass',
-    MetaClass.__bases__,
-    {
-        k: v for k, v in MetaClass.__dict__.items()
-        if k not in ('__dict__',)
-    }
-)
-
+MetaClass = MetaMetaClass('MetaClass',
+                          MetaClass.__bases__,
+                          {k: v for k, v in MetaClass.__dict__.items()
+                          if k not in ('__dict__',)})
 
 class OddInstance:
 
@@ -125,6 +119,6 @@ class OddInstance:
     def __delattr__(self, name):
         raise NotImplementedError()
 
-    def __repr__(self):  # pragma: no cover
+    def __repr__(self): # pragma: no cover
         return "<odd {} instance at {}>".format(
             self.__class__.__name__, hex(id(self)))

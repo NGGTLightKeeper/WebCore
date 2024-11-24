@@ -1,5 +1,5 @@
 from __future__ import absolute_import, division, unicode_literals
-from bleach.six_shim import viewkeys
+from six import with_metaclass, viewkeys
 
 import types
 
@@ -423,7 +423,7 @@ def getPhases(debug):
             return type
 
     # pylint:disable=unused-argument
-    class Phase(metaclass=getMetaclass(debug, log)):
+    class Phase(with_metaclass(getMetaclass(debug, log))):
         """Base class for helper object that implements each phase of processing
         """
         __slots__ = ("parser", "tree", "__startTagCache", "__endTagCache")

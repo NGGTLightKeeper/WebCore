@@ -29,6 +29,8 @@
 """Implementing support for MySQL Authentication Plugins"""
 from __future__ import annotations
 
+import copy
+
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from .errors import InterfaceError, NotSupportedError, get_exception
@@ -83,10 +85,6 @@ class MySQLAuthenticator:
                   `authenticate()`.
         """
         return self._plugin_config
-
-    def update_plugin_config(self, config: Dict[str, Any]) -> None:
-        """Update the 'plugin_config' instance variable"""
-        self._plugin_config.update(config)
 
     def setup_ssl(
         self,
@@ -304,6 +302,7 @@ class MySQLAuthenticator:
         auth_plugin_class: Optional[str] = None,
         conn_attrs: Optional[Dict[str, str]] = None,
         is_change_user_request: bool = False,
+        **plugin_config: Any,
     ) -> bytes:
         """Performs the authentication phase.
 
@@ -325,6 +324,9 @@ class MySQLAuthenticator:
                                than the authorization plugin name).
             conn_attrs: Connection attributes.
             is_change_user_request: Whether is a `change user request` operation or not.
+            plugin_config: Custom configuration to be passed to the auth plugin
+                           when invoked. The parameters defined here will override the
+                           ones defined in the auth plugin itself.
 
         Returns:
             ok_packet: OK packet.
@@ -339,6 +341,7 @@ class MySQLAuthenticator:
         # update credentials, plugin config and plugin class
         self._username = username
         self._passwords = {1: password1, 2: password2, 3: password3}
+        self._plugin_config = copy.deepcopy(plugin_config)
         self._auth_plugin_class = auth_plugin_class
 
         # client's handshake response

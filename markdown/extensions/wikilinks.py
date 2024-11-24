@@ -1,41 +1,35 @@
-# WikiLinks Extension for Python-Markdown
-# ======================================
+'''
+WikiLinks Extension for Python-Markdown
+======================================
 
-# Converts [[WikiLinks]] to relative links.
+Converts [[WikiLinks]] to relative links.
 
-# See https://Python-Markdown.github.io/extensions/wikilinks
-# for documentation.
+See <https://Python-Markdown.github.io/extensions/wikilinks>
+for documentation.
 
-# Original code Copyright [Waylan Limberg](http://achinghead.com/).
+Original code Copyright [Waylan Limberg](http://achinghead.com/).
 
-# All changes Copyright The Python Markdown Project
+All changes Copyright The Python Markdown Project
 
-# License: [BSD](https://opensource.org/licenses/bsd-license.php)
+License: [BSD](http://www.opensource.org/licenses/bsd-license.php)
 
-"""
-Converts `[[WikiLinks]]` to relative links.
+'''
 
-See the [documentation](https://Python-Markdown.github.io/extensions/wikilinks)
-for details.
-"""
-
-from __future__ import annotations
-
+from __future__ import absolute_import
+from __future__ import unicode_literals
 from . import Extension
 from ..inlinepatterns import InlineProcessor
-import xml.etree.ElementTree as etree
+from ..util import etree
 import re
-from typing import Any
 
 
-def build_url(label: str, base: str, end: str) -> str:
-    """ Build a URL from the label, a base, and an end. """
+def build_url(label, base, end):
+    """ Build a url from the label, a base, and an end. """
     clean_label = re.sub(r'([ ]+_)|(_[ ]+)|([ ]+)', '_', label)
-    return '{}{}{}'.format(base, clean_label, end)
+    return '%s%s%s' % (base, clean_label, end)
 
 
 class WikiLinkExtension(Extension):
-    """ Add inline processor to Markdown. """
 
     def __init__(self, **kwargs):
         self.config = {
@@ -44,8 +38,8 @@ class WikiLinkExtension(Extension):
             'html_class': ['wikilink', 'CSS hook. Leave blank for none.'],
             'build_url': [build_url, 'Callable formats URL from label.'],
         }
-        """ Default configuration options. """
-        super().__init__(**kwargs)
+
+        super(WikiLinkExtension, self).__init__(**kwargs)
 
     def extendMarkdown(self, md):
         self.md = md
@@ -58,13 +52,11 @@ class WikiLinkExtension(Extension):
 
 
 class WikiLinksInlineProcessor(InlineProcessor):
-    """ Build link from `wikilink`. """
-
-    def __init__(self, pattern: str, config: dict[str, Any]):
-        super().__init__(pattern)
+    def __init__(self, pattern, config):
+        super(WikiLinksInlineProcessor, self).__init__(pattern)
         self.config = config
 
-    def handleMatch(self, m: re.Match[str], data: str) -> tuple[etree.Element | str, int, int]:
+    def handleMatch(self, m, data):
         if m.group(1).strip():
             base_url, end_url, html_class = self._getMeta()
             label = m.group(1).strip()
@@ -78,8 +70,8 @@ class WikiLinksInlineProcessor(InlineProcessor):
             a = ''
         return a, m.start(0), m.end(0)
 
-    def _getMeta(self) -> tuple[str, str, str]:
-        """ Return meta data or `config` data. """
+    def _getMeta(self):
+        """ Return meta data or config data. """
         base_url = self.config['base_url']
         end_url = self.config['end_url']
         html_class = self.config['html_class']

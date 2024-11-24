@@ -24,8 +24,7 @@ __all__ = [
     'asStructuredText',
 ]
 
-
-def asStructuredText(iface, munge=0, rst=False):
+def asStructuredText(I, munge=0, rst=False):
     """ Output structured text format.  Note, this will whack any existing
     'structured' format of the text.
 
@@ -34,21 +33,19 @@ def asStructuredText(iface, munge=0, rst=False):
     """
 
     if rst:
-        def inline_literal(s):
-            return f"``{s}``"
+        inline_literal = lambda s: "``{}``".format(s)
     else:
-        def inline_literal(s):
-            return s
+        inline_literal = lambda s: s
 
-    r = [inline_literal(iface.getName())]
+    r = [inline_literal(I.getName())]
     outp = r.append
     level = 1
 
-    if iface.getDoc():
-        outp(_justify_and_indent(_trim_doc_string(iface.getDoc()), level))
+    if I.getDoc():
+        outp(_justify_and_indent(_trim_doc_string(I.getDoc()), level))
 
     bases = [base
-             for base in iface.__bases__
+             for base in I.__bases__
              if base is not zope.interface.Interface
              ]
     if bases:
@@ -59,16 +56,14 @@ def asStructuredText(iface, munge=0, rst=False):
             outp(_justify_and_indent(_trim_doc_string(item), level, munge))
         level -= 1
 
-    namesAndDescriptions = sorted(iface.namesAndDescriptions())
+    namesAndDescriptions = sorted(I.namesAndDescriptions())
 
     outp(_justify_and_indent("Attributes:", level, munge))
     level += 1
     for name, desc in namesAndDescriptions:
         if not hasattr(desc, 'getSignatureString'):   # ugh...
-            item = "{} -- {}".format(
-                inline_literal(desc.getName()),
-                desc.getDoc() or 'no documentation'
-            )
+            item = "{} -- {}".format(inline_literal(desc.getName()),
+                                 desc.getDoc() or 'no documentation')
             outp(_justify_and_indent(_trim_doc_string(item), level, munge))
     level -= 1
 
@@ -76,21 +71,18 @@ def asStructuredText(iface, munge=0, rst=False):
     level += 1
     for name, desc in namesAndDescriptions:
         if hasattr(desc, 'getSignatureString'):   # ugh...
-            _call = f"{desc.getName()}{desc.getSignatureString()}"
-            item = "{} -- {}".format(
-                inline_literal(_call),
-                desc.getDoc() or 'no documentation'
-            )
+            _call = "{}{}".format(desc.getName(), desc.getSignatureString())
+            item = "{} -- {}".format(inline_literal(_call),
+                                 desc.getDoc() or 'no documentation')
             outp(_justify_and_indent(_trim_doc_string(item), level, munge))
 
     return "\n\n".join(r) + "\n\n"
 
 
-def asReStructuredText(iface, munge=0):
-    """ Output reStructuredText format.
-
-    Note, this will whack any existing 'structured' format of the text."""
-    return asStructuredText(iface, munge=munge, rst=True)
+def asReStructuredText(I, munge=0):
+    """ Output reStructuredText format.  Note, this will whack any existing
+    'structured' format of the text."""
+    return asStructuredText(I, munge=munge, rst=True)
 
 
 def _trim_doc_string(text):

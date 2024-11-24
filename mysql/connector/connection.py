@@ -222,17 +222,11 @@ class MySQLConnection(MySQLConnectionAbstract):
         self._character_set.set_mysql_version(self._server_version)
 
         if not handshake["capabilities"] & ClientFlag.SSL:
-            if not self.is_secure:
-                if self._auth_plugin == "mysql_clear_password":
-                    raise InterfaceError(
-                        "Clear password authentication is not supported over "
-                        "insecure channels"
-                    )
-                if self._auth_plugin == "authentication_openid_connect_client":
-                    raise InterfaceError(
-                        "OpenID Connect authentication is not supported over "
-                        "insecure channels"
-                    )
+            if self._auth_plugin == "mysql_clear_password" and not self.is_secure:
+                raise InterfaceError(
+                    "Clear password authentication is not supported over "
+                    "insecure channels"
+                )
             if self._ssl.get("verify_cert"):
                 raise InterfaceError(
                     "SSL is required but the server doesn't support it",
@@ -300,17 +294,6 @@ class MySQLConnection(MySQLConnectionAbstract):
             )
             self._ssl_active = True
 
-        # Add the custom configurations required by specific auth plugins
-        self._authenticator.update_plugin_config(
-            config={
-                "krb_service_principal": self._krb_service_principal,
-                "oci_config_file": self._oci_config_file,
-                "oci_config_profile": self._oci_config_profile,
-                "webauthn_callback": self._webauthn_callback,
-                "openid_token_file": self._openid_token_file,
-            }
-        )
-
         ok_pkt = self._authenticator.authenticate(
             sock=self._socket,
             handshake=self._handshake,
@@ -324,6 +307,10 @@ class MySQLConnection(MySQLConnectionAbstract):
             auth_plugin=self._auth_plugin,
             auth_plugin_class=self._auth_plugin_class,
             conn_attrs=conn_attrs,
+            krb_service_principal=self._krb_service_principal,
+            oci_config_file=self._oci_config_file,
+            oci_config_profile=self._oci_config_profile,
+            webauthn_callback=self._webauthn_callback,
         )
         self._handle_ok(ok_pkt)
 
@@ -1047,7 +1034,6 @@ class MySQLConnection(MySQLConnectionAbstract):
         password3: str = "",
         oci_config_file: str = "",
         oci_config_profile: str = "",
-        openid_token_file: str = "",
     ) -> Optional[OkPacketType]:
         """Change the current logged in user
 
@@ -1082,18 +1068,8 @@ class MySQLConnection(MySQLConnectionAbstract):
 
         if oci_config_file:
             self._oci_config_file = oci_config_file
-        if openid_token_file:
-            self._openid_token_file = openid_token_file
-        self._oci_config_profile = oci_config_profile
 
-        # Update the custom configurations needed by specific auth plugins
-        self._authenticator.update_plugin_config(
-            config={
-                "oci_config_file": self._oci_config_file,
-                "oci_config_profile": self._oci_config_profile,
-                "openid_token_file": self._openid_token_file,
-            }
-        )
+        self._oci_config_profile = oci_config_profile
 
         ok_pkt = self._authenticator.authenticate(
             sock=self._socket,
@@ -1109,6 +1085,10 @@ class MySQLConnection(MySQLConnectionAbstract):
             auth_plugin_class=self._auth_plugin_class,
             conn_attrs=self._conn_attrs,
             is_change_user_request=True,
+            krb_service_principal=self._krb_service_principal,
+            oci_config_file=self._oci_config_file,
+            oci_config_profile=self._oci_config_profile,
+            webauthn_callback=self._webauthn_callback,
         )
 
         if not (self._client_flags & ClientFlag.CONNECT_WITH_DB) and database:
@@ -1187,7 +1167,6 @@ class MySQLConnection(MySQLConnectionAbstract):
                     self._password3,
                     self._oci_config_file,
                     self._oci_config_profile,
-                    self._openid_token_file,
                 )
             except ProgrammingError:
                 self.reconnect()
