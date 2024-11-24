@@ -14,16 +14,15 @@ from collections import defaultdict
 from itertools import filterfalse
 from typing import Dict, Mapping, TypeVar
 
-from .. import _reqs
-from ..extern.jaraco.text import yield_lines
-from ..extern.packaging.requirements import Requirement
+from jaraco.text import yield_lines
+from packaging.requirements import Requirement
 
+from .. import _reqs
+from .._reqs import _StrOrIter
 
 # dict can work as an ordered set
 _T = TypeVar("_T")
 _Ordered = Dict[_T, None]
-_ordered = dict
-_StrOrIter = _reqs._StrOrIter
 
 
 def _prepare(

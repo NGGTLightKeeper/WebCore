@@ -12,6 +12,7 @@
 
 
 import array
+import sys
 import unittest
 from collections import OrderedDict
 from collections import abc
@@ -53,24 +54,24 @@ class TestVerifyClass(VerifyClassMixin, unittest.TestCase):
         self.assertTrue(self.verify(collections.ISequence,
                                     collections.UserString))
 
-    # Now we go through the registry, which should have several things,
-    # mostly builtins, but if we've imported other libraries already,
-    # it could contain things from outside of there too. We aren't concerned
-    # about third-party code here, just standard library types. We start with a
-    # blacklist of things to exclude, but if that gets out of hand we can figure
-    # out a better whitelisting.
+    # Now we go through the registry, which should have several things, mostly
+    # builtins, but if we've imported other libraries already, it could
+    # contain things from outside of there too. We aren't concerned about
+    # third-party code here, just standard library types. We start with a
+    # blacklist of things to exclude, but if that gets out of hand we can
+    # figure out a better whitelisting.
     UNVERIFIABLE = {
         # This is declared to be an ISequence, but is missing lots of methods,
         # including some that aren't part of a language protocol, such as
         # ``index`` and ``count``.
         memoryview,
         # 'pkg_resources._vendor.pyparsing.ParseResults' is registered as a
-        # MutableMapping but is missing methods like ``popitem`` and ``setdefault``.
-        # It's imported due to namespace packages.
+        # MutableMapping but is missing methods like ``popitem`` and
+        # ``setdefault``.  It's imported due to namespace packages.
         'ParseResults',
-        # sqlite3.Row claims ISequence but also misses ``index`` and ``count``.
-        # It's imported because...? Coverage imports it, but why do we have it without
-        # coverage?
+        # sqlite3.Row claims ISequence but also misses ``index`` and
+        # ``count``.  It's imported because...? Coverage imports it, but why
+        # do we have it without coverage?
         'Row',
         # In Python 3.10 ``array.array`` appears as ``IMutableSequence`` but it
         # does not provide a ``clear()`` method and it cannot be instantiated
@@ -81,9 +82,9 @@ class TestVerifyClass(VerifyClassMixin, unittest.TestCase):
     if PYPY:
         UNVERIFIABLE.update({
             # collections.deque.pop() doesn't support the index= argument to
-            # MutableSequence.pop(). We can't verify this on CPython because we can't
-            # get the signature, but on PyPy we /can/ get the signature, and of course
-            # it doesn't match.
+            # MutableSequence.pop(). We can't verify this on CPython because
+            # we can't get the signature, but on PyPy we /can/ get the
+            # signature, and of course it doesn't match.
             deque,
             # Likewise for index
             range,
@@ -96,7 +97,12 @@ class TestVerifyClass(VerifyClassMixin, unittest.TestCase):
         array.array,
     }
 
+
 add_abc_interface_tests(TestVerifyClass, collections.ISet.__module__)
+
+
+def _get_FrameLocalsProxy():
+    return type(sys._getframe().f_locals)
 
 
 class TestVerifyObject(VerifyObjectMixin,
@@ -126,6 +132,11 @@ class TestVerifyObject(VerifyObjectMixin,
         'async_generator': unittest.SkipTest,
         type(iter(tuple())): lambda: iter(tuple()),
     }
+    if sys.version_info >= (3, 13):
+        def FrameLocalsProxy_constructor():
+            return _get_FrameLocalsProxy()(sys._getframe())
+        FrameLocalsProxy = _get_FrameLocalsProxy()
+        CONSTRUCTORS[FrameLocalsProxy] = FrameLocalsProxy_constructor
 
     UNVERIFIABLE_RO = {
         # ``array.array`` fails the ``test_auto_ro_*`` tests with and
