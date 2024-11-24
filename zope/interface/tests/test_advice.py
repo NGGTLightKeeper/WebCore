@@ -37,7 +37,7 @@ class FrameInfoTest(unittest.TestCase):
          f_locals, f_globals) = advisory_testing.moduleLevelFrameInfo
         self.assertEqual(kind, "module")
         for d in module.__dict__, f_locals, f_globals:
-            self.assertTrue(d is advisory_testing.my_globals)
+            self.assertIs(d, advisory_testing.my_globals)
 
     def test_w_class(self):
         from zope.interface.tests import advisory_testing
@@ -48,7 +48,7 @@ class FrameInfoTest(unittest.TestCase):
         self.assertEqual(kind, "class")
 
         for d in module.__dict__, f_globals:
-            self.assertTrue(d is advisory_testing.my_globals)
+            self.assertIs(d, advisory_testing.my_globals)
 
     def test_inside_function_call(self):
         from zope.interface.advice import getFrameInfo
@@ -60,7 +60,7 @@ class FrameInfoTest(unittest.TestCase):
         self.assertEqual(f_locals, locals())
 
         for d in module.__dict__, f_globals:
-            self.assertTrue(d is globals())
+            self.assertIs(d, globals())
 
     def test_inside_exec(self):
         from zope.interface.advice import getFrameInfo
@@ -68,15 +68,16 @@ class FrameInfoTest(unittest.TestCase):
         _locals = {}
         exec(_FUNKY_EXEC, _globals, _locals)
         self.assertEqual(_locals['kind'], "exec")
-        self.assertTrue(_locals['f_locals'] is _locals)
-        self.assertTrue(_locals['module'] is None)
-        self.assertTrue(_locals['f_globals'] is _globals)
+        self.assertIs(_locals['f_locals'], _locals)
+        self.assertIsNone(_locals['module'])
+        self.assertIs(_locals['f_globals'], _globals)
 
 
 _FUNKY_EXEC = """\
 import sys
 kind, module, f_locals, f_globals = getFrameInfo(sys._getframe())
 """
+
 
 class Test_isClassAdvisor(unittest.TestCase):
 
@@ -88,13 +89,17 @@ class Test_isClassAdvisor(unittest.TestCase):
         self.assertEqual(self._callFUT(self), False)
 
     def test_w_normal_function(self):
+
         def foo():
             raise NotImplementedError()
+
         self.assertEqual(self._callFUT(foo), False)
 
     def test_w_advisor_function(self):
+
         def bar():
             raise NotImplementedError()
+
         bar.previousMetaclass = object()
         self.assertEqual(self._callFUT(bar), True)
 
@@ -106,24 +111,31 @@ class Test_determineMetaclass(unittest.TestCase):
         return determineMetaclass(*args, **kw)
 
     def test_empty_w_explicit_metatype(self):
+
         class Meta(type):
             pass
+
         self.assertEqual(self._callFUT((), Meta), Meta)
 
     def test_single(self):
+
         class Meta(type):
             pass
+
         self.assertEqual(self._callFUT((Meta,)), type)
 
     def test_meta_of_class(self):
+
         class Metameta(type):
             pass
+
         class Meta(type, metaclass=Metameta):
             pass
 
         self.assertEqual(self._callFUT((Meta, type)), Metameta)
 
     def test_multiple_in_hierarchy_py3k(self):
+
         class Meta_A(type):
             pass
 
@@ -138,8 +150,8 @@ class Test_determineMetaclass(unittest.TestCase):
 
         self.assertEqual(self._callFUT((A, B)), Meta_B)
 
-
     def test_multiple_not_in_hierarchy_py3k(self):
+
         class Meta_A(type):
             pass
 
@@ -168,19 +180,26 @@ class Test_minimalBases(unittest.TestCase):
         self.assertEqual(self._callFUT([type]), [type])
 
     def test_w_newstyle_class(self):
+
         class C:
             pass
+
         self.assertEqual(self._callFUT([C]), [C])
 
     def test_simple_hierarchy_skips_implied(self):
+
         class A:
             pass
+
         class B(A):
             pass
+
         class C(B):
             pass
+
         class D:
             pass
+
         self.assertEqual(self._callFUT([A, B, C]), [C])
         self.assertEqual(self._callFUT([A, C]), [C])
         self.assertEqual(self._callFUT([B, C]), [C])
@@ -188,8 +207,11 @@ class Test_minimalBases(unittest.TestCase):
         self.assertEqual(self._callFUT([D, B, D]), [B, D])
 
     def test_repeats_kicked_to_end_of_queue(self):
+
         class A:
             pass
+
         class B:
             pass
+
         self.assertEqual(self._callFUT([A, B, A]), [B, A])

@@ -1,21 +1,25 @@
 from __future__ import annotations
 
+import fnmatch
+import itertools
+import os
+import stat
+import textwrap
 from functools import partial
 from glob import glob
-from distutils.util import convert_path
-import distutils.command.build_py as orig
-import os
-import fnmatch
-import textwrap
-import distutils.errors
-import itertools
-import stat
 from pathlib import Path
 from typing import Iterable, Iterator
 
-from ..extern.more_itertools import unique_everseen
+from more_itertools import unique_everseen
+
+from setuptools._path import StrPath
+
+from ..dist import Distribution
 from ..warnings import SetuptoolsDeprecationWarning
 
+import distutils.command.build_py as orig
+import distutils.errors
+from distutils.util import convert_path
 
 _IMPLICIT_DATA_FILES = ('*.pyi', 'py.typed')
 
@@ -34,6 +38,7 @@ class build_py(orig.build_py):
     'py_modules' and 'packages' in the same setup operation.
     """
 
+    distribution: Distribution  # override distutils.dist.Distribution with setuptools.dist.Distribution
     editable_mode: bool = False
     existing_egg_info_dir: str | None = None  #: Private API, internal use only.
 
@@ -45,14 +50,14 @@ class build_py(orig.build_py):
             del self.__dict__['data_files']
         self.__updated_files = []
 
-    def copy_file(
+    def copy_file(  # type: ignore[override] # No overload, str support only
         self,
-        infile,
-        outfile,
-        preserve_mode=True,
-        preserve_times=True,
-        link=None,
-        level=1,
+        infile: StrPath,
+        outfile: StrPath,
+        preserve_mode: bool = True,
+        preserve_times: bool = True,
+        link: str | None = None,
+        level: object = 1,
     ):
         # Overwrite base class to allow using links
         if link:
@@ -78,7 +83,7 @@ class build_py(orig.build_py):
         # output files are.
         self.byte_compile(orig.build_py.get_outputs(self, include_bytecode=False))
 
-    def __getattr__(self, attr):
+    def __getattr__(self, attr: str):
         "lazily compute data files"
         if attr == 'data_files':
             self.data_files = self._get_data_files()
@@ -138,7 +143,7 @@ class build_py(orig.build_py):
         )
         return self.exclude_data_files(package, src_dir, files)
 
-    def get_outputs(self, include_bytecode=True) -> list[str]:
+    def get_outputs(self, include_bytecode: bool = True) -> list[str]:  # type: ignore[override] # Using a real boolean instead of 0|1
         """See :class:`setuptools.commands.build.SubCommand`"""
         if self.editable_mode:
             return list(self.get_output_mapping().keys())

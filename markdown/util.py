@@ -1,50 +1,41 @@
-# -*- coding: utf-8 -*-
+# Python Markdown
+
+# A Python implementation of John Gruber's Markdown.
+
+# Documentation: https://python-markdown.github.io/
+# GitHub: https://github.com/Python-Markdown/markdown/
+# PyPI: https://pypi.org/project/Markdown/
+
+# Started by Manfred Stienstra (http://www.dwerg.net/).
+# Maintained for a few years by Yuri Takhteyev (http://www.freewisdom.org).
+# Currently maintained by Waylan Limberg (https://github.com/waylan),
+# Dmitry Shachnev (https://github.com/mitya57) and Isaac Muse (https://github.com/facelessuser).
+
+# Copyright 2007-2023 The Python Markdown Project (v. 1.7 and later)
+# Copyright 2004, 2005, 2006 Yuri Takhteyev (v. 0.2-1.6b)
+# Copyright 2004 Manfred Stienstra (the original version)
+
+# License: BSD (see LICENSE.md for details).
+
 """
-Python Markdown
-
-A Python implementation of John Gruber's Markdown.
-
-Documentation: https://python-markdown.github.io/
-GitHub: https://github.com/Python-Markdown/markdown/
-PyPI: https://pypi.org/project/Markdown/
-
-Started by Manfred Stienstra (http://www.dwerg.net/).
-Maintained for a few years by Yuri Takhteyev (http://www.freewisdom.org).
-Currently maintained by Waylan Limberg (https://github.com/waylan),
-Dmitry Shachnev (https://github.com/mitya57) and Isaac Muse (https://github.com/facelessuser).
-
-Copyright 2007-2018 The Python Markdown Project (v. 1.7 and later)
-Copyright 2004, 2005, 2006 Yuri Takhteyev (v. 0.2-1.6b)
-Copyright 2004 Manfred Stienstra (the original version)
-
-License: BSD (see LICENSE.md for details).
+This module contains various contacts, classes and functions which get referenced and used
+throughout the code base.
 """
 
-from __future__ import unicode_literals
+from __future__ import annotations
+
 import re
 import sys
-from collections import namedtuple
-from functools import wraps
 import warnings
+from functools import wraps, lru_cache
+from itertools import count
+from typing import TYPE_CHECKING, Generic, Iterator, NamedTuple, TypeVar, TypedDict, overload
 
+if TYPE_CHECKING:  # pragma: no cover
+    from markdown import Markdown
+    import xml.etree.ElementTree as etree
 
-"""
-Python 3 Stuff
-=============================================================================
-"""
-PY3 = sys.version_info[0] == 3
-PY37 = (3, 7) <= sys.version_info
-
-if PY3:  # pragma: no cover
-    string_type = str
-    text_type = str
-    int2str = chr
-    iterrange = range
-else:  # pragma: no cover
-    string_type = basestring   # noqa
-    text_type = unicode        # noqa
-    int2str = unichr           # noqa
-    iterrange = xrange         # noqa
+_T = TypeVar('_T')
 
 
 """
@@ -53,34 +44,47 @@ Constants you might want to modify
 """
 
 
-BLOCK_LEVEL_ELEMENTS = [
+BLOCK_LEVEL_ELEMENTS: list[str] = [
     # Elements which are invalid to wrap in a `<p>` tag.
-    # See http://w3c.github.io/html/grouping-content.html#the-p-element
+    # See https://w3c.github.io/html/grouping-content.html#the-p-element
     'address', 'article', 'aside', 'blockquote', 'details', 'div', 'dl',
     'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3',
-    'h4', 'h5', 'h6', 'header', 'hr', 'main', 'menu', 'nav', 'ol', 'p', 'pre',
-    'section', 'table', 'ul',
+    'h4', 'h5', 'h6', 'header', 'hgroup', 'hr', 'main', 'menu', 'nav', 'ol',
+    'p', 'pre', 'section', 'table', 'ul',
     # Other elements which Markdown should not be mucking up the contents of.
-    'canvas', 'dd', 'dt', 'group', 'iframe', 'li', 'math', 'noscript', 'output',
-    'progress', 'script', 'style', 'tbody', 'td', 'th', 'thead', 'tr', 'video'
+    'canvas', 'colgroup', 'dd', 'body', 'dt', 'group', 'html', 'iframe', 'li', 'legend',
+    'math', 'map', 'noscript', 'output', 'object', 'option', 'progress', 'script',
+    'style', 'summary', 'tbody', 'td', 'textarea', 'tfoot', 'th', 'thead', 'tr', 'video'
 ]
+"""
+List of HTML tags which get treated as block-level elements. Same as the `block_level_elements`
+attribute of the [`Markdown`][markdown.Markdown] class. Generally one should use the
+attribute on the class. This remains for compatibility with older extensions.
+"""
 
 # Placeholders
-STX = '\u0002'  # Use STX ("Start of text") for start-of-placeholder
-ETX = '\u0003'  # Use ETX ("End of text") for end-of-placeholder
+STX = '\u0002'
+""" "Start of Text" marker for placeholder templates. """
+ETX = '\u0003'
+""" "End of Text" marker for placeholder templates. """
 INLINE_PLACEHOLDER_PREFIX = STX+"klzzwxh:"
+""" Prefix for inline placeholder template. """
 INLINE_PLACEHOLDER = INLINE_PLACEHOLDER_PREFIX + "%s" + ETX
+""" Placeholder template for stashed inline text. """
 INLINE_PLACEHOLDER_RE = re.compile(INLINE_PLACEHOLDER % r'([0-9]+)')
+""" Regular Expression which matches inline placeholders. """
 AMP_SUBSTITUTE = STX+"amp"+ETX
+""" Placeholder template for HTML entities. """
 HTML_PLACEHOLDER = STX + "wzxhzdk:%s" + ETX
+""" Placeholder template for raw HTML. """
 HTML_PLACEHOLDER_RE = re.compile(HTML_PLACEHOLDER % r'([0-9]+)')
+""" Regular expression which matches HTML placeholders. """
 TAG_PLACEHOLDER = STX + "hzzhzkh:%s" + ETX
+""" Placeholder template for tags. """
 
 
-"""
-Constants you probably do not need to change
------------------------------------------------------------------------------
-"""
+# Constants you probably do not need to change
+# -----------------------------------------------------------------------------
 
 RTL_BIDI_RANGES = (
     ('\u0590', '\u07FF'),
@@ -90,64 +94,53 @@ RTL_BIDI_RANGES = (
     ('\u2D30', '\u2D7F')  # Tifinagh
 )
 
-# Extensions should use "markdown.util.etree" instead of "etree" (or do `from
-# markdown.util import etree`).  Do not import it by yourself.
 
-try:  # pragma: no cover
-    # Is the C implementation of ElementTree available?
-    import xml.etree.cElementTree as etree
-    from xml.etree.ElementTree import Comment
-    # Serializers (including ours) test with non-c Comment
-    etree.test_comment = Comment
-    if etree.VERSION < "1.0.5":
-        raise RuntimeError("cElementTree version 1.0.5 or higher is required.")
-except (ImportError, RuntimeError):  # pragma: no cover
-    # Use the Python implementation of ElementTree?
-    import xml.etree.ElementTree as etree
-    if etree.VERSION < "1.1":
-        raise RuntimeError("ElementTree version 1.1 or higher is required")
+# AUXILIARY GLOBAL FUNCTIONS
+# =============================================================================
 
 
-"""
-AUXILIARY GLOBAL FUNCTIONS
-=============================================================================
-"""
+@lru_cache(maxsize=None)
+def get_installed_extensions():
+    """ Return all entry_points in the `markdown.extensions` group. """
+    if sys.version_info >= (3, 10):
+        from importlib import metadata
+    else:  # `<PY310` use backport
+        import importlib_metadata as metadata
+    # Only load extension entry_points once.
+    return metadata.entry_points(group='markdown.extensions')
 
 
-def deprecated(message, stacklevel=2):
+def deprecated(message: str, stacklevel: int = 2):
     """
-    Raise a DeprecationWarning when wrapped function/method is called.
+    Raise a [`DeprecationWarning`][] when wrapped function/method is called.
 
-    Borrowed from https://stackoverflow.com/a/48632082/866026
+    Usage:
+
+    ```python
+    @deprecated("This method will be removed in version X; use Y instead.")
+    def some_method():
+        pass
+    ```
     """
-    def deprecated_decorator(func):
+    def wrapper(func):
         @wraps(func)
         def deprecated_func(*args, **kwargs):
             warnings.warn(
-                "'{}' is deprecated. {}".format(func.__name__, message),
+                f"'{func.__name__}' is deprecated. {message}",
                 category=DeprecationWarning,
                 stacklevel=stacklevel
             )
             return func(*args, **kwargs)
         return deprecated_func
-    return deprecated_decorator
+    return wrapper
 
 
-@deprecated("Use 'Markdown.is_block_level' instead.")
-def isBlockLevel(tag):
-    """Check if the tag is a block level HTML tag."""
-    if isinstance(tag, string_type):
-        return tag.lower().rstrip('/') in BLOCK_LEVEL_ELEMENTS
-    # Some ElementTree tags are not strings, so return False.
-    return False
-
-
-def parseBoolValue(value, fail_on_errors=True, preserve_none=False):
-    """Parses a string representing bool value. If parsing was successful,
-       returns True or False. If preserve_none=True, returns True, False,
-       or None. If parsing was not successful, raises  ValueError, or, if
-       fail_on_errors=False, returns None."""
-    if not isinstance(value, string_type):
+def parseBoolValue(value: str | None, fail_on_errors: bool = True, preserve_none: bool = False) -> bool | None:
+    """Parses a string representing a boolean value. If parsing was successful,
+       returns `True` or `False`. If `preserve_none=True`, returns `True`, `False`,
+       or `None`. If parsing was not successful, raises `ValueError`, or, if
+       `fail_on_errors=False`, returns `None`."""
+    if not isinstance(value, str):
         if preserve_none and value is None:
             return value
         return bool(value)
@@ -161,8 +154,8 @@ def parseBoolValue(value, fail_on_errors=True, preserve_none=False):
         raise ValueError('Cannot parse bool value: %r' % value)
 
 
-def code_escape(text):
-    """Escape code."""
+def code_escape(text: str) -> str:
+    """HTML escape a string of code."""
     if "&" in text:
         text = text.replace("&", "&amp;")
     if "<" in text:
@@ -172,52 +165,77 @@ def code_escape(text):
     return text
 
 
-"""
-MISC AUXILIARY CLASSES
-=============================================================================
-"""
+def _get_stack_depth(size: int = 2) -> int:
+    """Get current stack depth, performantly.
+    """
+    frame = sys._getframe(size)
+
+    for size in count(size):
+        frame = frame.f_back
+        if not frame:
+            return size
 
 
-class AtomicString(text_type):
+def nearing_recursion_limit() -> bool:
+    """Return true if current stack depth is within 100 of maximum limit."""
+    return sys.getrecursionlimit() - _get_stack_depth() < 100
+
+
+# MISC AUXILIARY CLASSES
+# =============================================================================
+
+
+class AtomicString(str):
     """A string which should not be further processed."""
     pass
 
 
-class Processor(object):
-    def __init__(self, md=None):
+class Processor:
+    """ The base class for all processors.
+
+    Attributes:
+        Processor.md: The `Markdown` instance passed in an initialization.
+
+    Arguments:
+        md: The `Markdown` instance this processor is a part of.
+
+    """
+    def __init__(self, md: Markdown | None = None):
         self.md = md
 
-    @property
-    @deprecated("Use 'md' instead.")
-    def markdown(self):
-        # TODO: remove this later
-        return self.md
+
+if TYPE_CHECKING:  # pragma: no cover
+    class TagData(TypedDict):
+        tag: str
+        attrs: dict[str, str]
+        left_index: int
+        right_index: int
 
 
-class HtmlStash(object):
+class HtmlStash:
     """
     This class is used for stashing HTML objects that we extract
     in the beginning and replace with place-holders.
     """
 
     def __init__(self):
-        """ Create a HtmlStash. """
+        """ Create an `HtmlStash`. """
         self.html_counter = 0  # for counting inline html segments
-        self.rawHtmlBlocks = []
+        self.rawHtmlBlocks: list[str | etree.Element] = []
         self.tag_counter = 0
-        self.tag_data = []  # list of dictionaries in the order tags appear
+        self.tag_data: list[TagData] = []  # list of dictionaries in the order tags appear
 
-    def store(self, html):
+    def store(self, html: str | etree.Element) -> str:
         """
         Saves an HTML segment for later reinsertion.  Returns a
         placeholder string that needs to be inserted into the
         document.
 
         Keyword arguments:
+            html: An html segment.
 
-        * html: an html segment
-
-        Returns : a placeholder string
+        Returns:
+            A placeholder string.
 
         """
         self.rawHtmlBlocks.append(html)
@@ -225,30 +243,33 @@ class HtmlStash(object):
         self.html_counter += 1
         return placeholder
 
-    def reset(self):
+    def reset(self) -> None:
+        """ Clear the stash. """
         self.html_counter = 0
         self.rawHtmlBlocks = []
 
-    def get_placeholder(self, key):
+    def get_placeholder(self, key: int) -> str:
         return HTML_PLACEHOLDER % key
 
-    def store_tag(self, tag, attrs, left_index, right_index):
+    def store_tag(self, tag: str, attrs: dict[str, str], left_index: int, right_index: int) -> str:
         """Store tag data and return a placeholder."""
         self.tag_data.append({'tag': tag, 'attrs': attrs,
                               'left_index': left_index,
                               'right_index': right_index})
         placeholder = TAG_PLACEHOLDER % str(self.tag_counter)
-        self.tag_counter += 1  # equal to the tag's index in self.tag_data
+        self.tag_counter += 1  # equal to the tag's index in `self.tag_data`
         return placeholder
 
 
 # Used internally by `Registry` for each item in its sorted list.
 # Provides an easier to read API when editing the code later.
 # For example, `item.name` is more clear than `item[0]`.
-_PriorityItem = namedtuple('PriorityItem', ['name', 'priority'])
+class _PriorityItem(NamedTuple):
+    name: str
+    priority: float
 
 
-class Registry(object):
+class Registry(Generic[_T]):
     """
     A priority sorted registry.
 
@@ -289,25 +310,33 @@ class Registry(object):
     """
 
     def __init__(self):
-        self._data = {}
-        self._priority = []
+        self._data: dict[str, _T] = {}
+        self._priority: list[_PriorityItem] = []
         self._is_sorted = False
 
-    def __contains__(self, item):
-        if isinstance(item, string_type):
+    def __contains__(self, item: str | _T) -> bool:
+        if isinstance(item, str):
             # Check if an item exists by this name.
             return item in self._data.keys()
         # Check if this instance exists.
         return item in self._data.values()
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[_T]:
         self._sort()
         return iter([self._data[k] for k, p in self._priority])
 
-    def __getitem__(self, key):
+    @overload
+    def __getitem__(self, key: str | int) -> _T:  # pragma: no cover
+        ...
+
+    @overload
+    def __getitem__(self, key: slice) -> Registry[_T]:  # pragma: no cover
+        ...
+
+    def __getitem__(self, key: str | int | slice) -> _T | Registry[_T]:
         self._sort()
         if isinstance(key, slice):
-            data = Registry()
+            data: Registry[_T] = Registry()
             for k, p in self._priority[key]:
                 data.register(self._data[k], k, p)
             return data
@@ -315,13 +344,13 @@ class Registry(object):
             return self._data[self._priority[key].name]
         return self._data[key]
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._priority)
 
     def __repr__(self):
-        return '<{0}({1})>'.format(self.__class__.__name__, list(self))
+        return '<{}({})>'.format(self.__class__.__name__, list(self))
 
-    def get_index_for_name(self, name):
+    def get_index_for_name(self, name: str) -> int:
         """
         Return the index of the given name.
         """
@@ -330,20 +359,19 @@ class Registry(object):
             return self._priority.index(
                 [x for x in self._priority if x.name == name][0]
             )
-        raise ValueError('No item named "{0}" exists.'.format(name))
+        raise ValueError('No item named "{}" exists.'.format(name))
 
-    def register(self, item, name, priority):
+    def register(self, item: _T, name: str, priority: float) -> None:
         """
         Add an item to the registry with the given name and priority.
 
-        Parameters:
-
-        * `item`: The item being registered.
-        * `name`: A string used to reference the item.
-        * `priority`: An integer or float used to sort against all items.
+        Arguments:
+            item: The item being registered.
+            name: A string used to reference the item.
+            priority: An integer or float used to sort against all items.
 
         If an item is registered with a "name" which already exists, the
-        existing item is replaced with the new item. Tread carefully as the
+        existing item is replaced with the new item. Treat carefully as the
         old item is lost with no way to recover it. The new item will be
         sorted according to its priority and will **not** retain the position
         of the old item.
@@ -355,11 +383,11 @@ class Registry(object):
         self._data[name] = item
         self._priority.append(_PriorityItem(name, priority))
 
-    def deregister(self, name, strict=True):
+    def deregister(self, name: str, strict: bool = True) -> None:
         """
         Remove an item from the registry.
 
-        Set `strict=False` to fail silently.
+        Set `strict=False` to fail silently. Otherwise a [`ValueError`][] is raised for an unknown `name`.
         """
         try:
             index = self.get_index_for_name(name)
@@ -369,7 +397,7 @@ class Registry(object):
             if strict:
                 raise
 
-    def _sort(self):
+    def _sort(self) -> None:
         """
         Sort the registry by priority from highest to lowest.
 
@@ -378,84 +406,3 @@ class Registry(object):
         if not self._is_sorted:
             self._priority.sort(key=lambda item: item.priority, reverse=True)
             self._is_sorted = True
-
-    # Deprecated Methods which provide a smooth transition from OrderedDict
-
-    def __setitem__(self, key, value):
-        """ Register item with priorty 5 less than lowest existing priority. """
-        if isinstance(key, string_type):
-            warnings.warn(
-                'Using setitem to register a processor or pattern is deprecated. '
-                'Use the `register` method instead.',
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if key in self:
-                # Key already exists, replace without altering priority
-                self._data[key] = value
-                return
-            if len(self) == 0:
-                # This is the first item. Set priority to 50.
-                priority = 50
-            else:
-                self._sort()
-                priority = self._priority[-1].priority - 5
-            self.register(value, key, priority)
-        else:
-            raise TypeError
-
-    def __delitem__(self, key):
-        """ Deregister an item by name. """
-        if key in self:
-            self.deregister(key)
-            warnings.warn(
-                'Using del to remove a processor or pattern is deprecated. '
-                'Use the `deregister` method instead.',
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        else:
-            raise TypeError
-
-    def add(self, key, value, location):
-        """ Register a key by location. """
-        if len(self) == 0:
-            # This is the first item. Set priority to 50.
-            priority = 50
-        elif location == '_begin':
-            self._sort()
-            # Set priority 5 greater than highest existing priority
-            priority = self._priority[0].priority + 5
-        elif location == '_end':
-            self._sort()
-            # Set priority 5 less than lowest existing priority
-            priority = self._priority[-1].priority - 5
-        elif location.startswith('<') or location.startswith('>'):
-            # Set priority halfway between existing priorities.
-            i = self.get_index_for_name(location[1:])
-            if location.startswith('<'):
-                after = self._priority[i].priority
-                if i > 0:
-                    before = self._priority[i-1].priority
-                else:
-                    # Location is first item`
-                    before = after + 10
-            else:
-                # location.startswith('>')
-                before = self._priority[i].priority
-                if i < len(self) - 1:
-                    after = self._priority[i+1].priority
-                else:
-                    # location is last item
-                    after = before - 10
-            priority = before - ((before - after) / 2)
-        else:
-            raise ValueError('Not a valid location: "%s". Location key '
-                             'must start with a ">" or "<".' % location)
-        self.register(value, key, priority)
-        warnings.warn(
-            'Using the add method to register a processor or pattern is deprecated. '
-            'Use the `register` method instead.',
-            DeprecationWarning,
-            stacklevel=2,
-        )
