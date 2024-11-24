@@ -52,7 +52,6 @@ __all__ = [
 # pylint:disable=unexpected-special-method-signature
 # pylint:disable=too-many-lines
 
-
 class IElement(Interface):
     """
     Objects that have basic documentation and tagged values.
@@ -83,8 +82,7 @@ class IElement(Interface):
     # make ``IInterface`` define new methods
     # ``getIndirectTaggedValue``, etc, to include inheritance instead
     # of overriding ``getTaggedValue`` to do that, but that ship has sailed.
-    # So to keep things nice and symmetric, we define the ``Direct`` methods
-    # here.
+    # So to keep things nice and symmetric, we define the ``Direct`` methods here.
     ###
 
     def getTaggedValue(tag):
@@ -102,8 +100,7 @@ class IElement(Interface):
 
     def queryTaggedValue(tag, default=None):
         """
-        As for `getTaggedValue`, but instead of raising a `KeyError`, returns
-        *default*.
+        As for `getTaggedValue`, but instead of raising a `KeyError`, returns *default*.
 
 
         .. versionchanged:: 4.7.0
@@ -182,15 +179,14 @@ class IMethod(IAttribute):
         """Return a signature string suitable for inclusion in documentation.
 
         This method returns the function signature string. For example, if you
-        have ``def func(a, b, c=1, d='f')``, then the signature string is
-        ``"(a, b, c=1, d='f')"``.
+        have ``def func(a, b, c=1, d='f')``, then the signature string is ``"(a, b,
+        c=1, d='f')"``.
         """
-
 
 class ISpecification(Interface):
     """Object Behavioral specifications"""
     # pylint:disable=arguments-differ
-    def providedBy(object):  # pylint:disable=redefined-builtin
+    def providedBy(object): # pylint:disable=redefined-builtin
         """Test whether the interface is implemented by the object
 
         Return true of the object asserts that it implements the
@@ -350,7 +346,7 @@ class IInterface(ISpecification, IElement):
 
     """
     # pylint:disable=arguments-differ
-    def names(all=False):  # pylint:disable=redefined-builtin
+    def names(all=False): # pylint:disable=redefined-builtin
         """Get the interface attribute names
 
         Return a collection of the names of the attributes, including
@@ -361,7 +357,7 @@ class IInterface(ISpecification, IElement):
         attributes defined by base classes will be included.
         """
 
-    def namesAndDescriptions(all=False):  # pylint:disable=redefined-builtin
+    def namesAndDescriptions(all=False): # pylint:disable=redefined-builtin
         """Get the interface attribute names and descriptions
 
         Return a collection of the names and descriptions of the
@@ -465,7 +461,6 @@ class IDeclaration(ISpecification):
         """Return a true value of the interface specification is non-empty
         """
 
-
 class IInterfaceDeclaration(Interface):
     """
     Declare and check the interfaces of objects.
@@ -539,10 +534,10 @@ class IInterfaceDeclaration(Interface):
         A decorator that transforms a method specification into an
         implementation method.
 
-        This is used to override methods of ``Interface`` or provide new
-        methods.  Definitions using this decorator will not appear in
-        :meth:`IInterface.names()`.  It is possible to have an implementation
-        method and a method specification of the same name.
+        This is used to override methods of ``Interface`` or provide new methods.
+        Definitions using this decorator will not appear in :meth:`IInterface.names()`.
+        It is possible to have an implementation method and a method specification
+        of the same name.
 
         For example::
 
@@ -554,10 +549,10 @@ class IInterfaceDeclaration(Interface):
                          return obj
                      return super(type(IRange), self).__adapt__(obj)
 
-        You can use ``super`` to call the parent class functionality. Note
-        that the zero-argument version (``super().__adapt__``) works on Python
-        3.6 and above, but prior to that the two-argument version must be
-        used, and the class must be explicitly passed as the first argument.
+        You can use ``super`` to call the parent class functionality. Note that
+        the zero-argument version (``super().__adapt__``) works on Python 3.6 and above, but
+        prior to that the two-argument version must be used, and the class must be explicitly
+        passed as the first argument.
 
         .. versionadded:: 5.1.0
         .. seealso:: `zope.interface.interfacemethod`
@@ -672,7 +667,7 @@ class IInterfaceDeclaration(Interface):
         .. seealso:: `zope.interface.implementer_only`
         """
 
-    def directlyProvidedBy(object):  # pylint:disable=redefined-builtin
+    def directlyProvidedBy(object): # pylint:disable=redefined-builtin
         """
         Return the interfaces directly provided by the given object.
 
@@ -681,9 +676,7 @@ class IInterfaceDeclaration(Interface):
         .. seealso:: `zope.interface.directlyProvidedBy`
         """
 
-    def directlyProvides(
-        object, *interfaces,
-    ):  # pylint:disable=redefined-builtin
+    def directlyProvides(object, *interfaces): # pylint:disable=redefined-builtin
         """
         Declare interfaces declared directly for an object.
 
@@ -727,7 +720,7 @@ class IInterfaceDeclaration(Interface):
         .. seealso:: `zope.interface.directlyProvides`
         """
 
-    def alsoProvides(object, *interfaces):  # pylint:disable=redefined-builtin
+    def alsoProvides(object, *interfaces): # pylint:disable=redefined-builtin
         """
         Declare additional interfaces directly for an object.
 
@@ -742,9 +735,7 @@ class IInterfaceDeclaration(Interface):
         .. seealso:: `zope.interface.alsoProvides`
         """
 
-    def noLongerProvides(
-        object, interface,
-    ):  # pylint:disable=redefined-builtin
+    def noLongerProvides(object, interface): # pylint:disable=redefined-builtin
         """
         Remove an interface from the list of an object's directly provided
         interfaces.
@@ -812,7 +803,6 @@ class IInterfaceDeclaration(Interface):
         .. seealso:: `zope.interface.Declaration`
         """
 
-
 class IAdapterRegistry(Interface):
     """Provide an interface-based registry for adapters
 
@@ -866,15 +856,11 @@ class IAdapterRegistry(Interface):
         text.
         """
 
-    def queryAdapter(
-        object, provided, name='', default=None,
-    ):  # pylint:disable=redefined-builtin
+    def queryAdapter(object, provided, name='', default=None): # pylint:disable=redefined-builtin
         """Adapt an object using a registered adapter factory.
         """
 
-    def adapter_hook(
-        provided, object, name='', default=None,
-    ):  # pylint:disable=redefined-builtin
+    def adapter_hook(provided, object, name='', default=None): # pylint:disable=redefined-builtin
         """Adapt an object using a registered adapter factory.
 
         name must be text.
@@ -886,13 +872,11 @@ class IAdapterRegistry(Interface):
         An iterable object is returned that provides name-value two-tuples.
         """
 
-    def names(required, provided):  # pylint:disable=arguments-differ
+    def names(required, provided): # pylint:disable=arguments-differ
         """Return the names for which there are registered objects
         """
 
-    def subscribe(
-        required, provided, subscriber,
-    ):  # pylint:disable=arguments-differ
+    def subscribe(required, provided, subscriber): # pylint:disable=arguments-differ
         """Register a subscriber
 
         A subscriber is registered for a *sequence* of required
@@ -970,14 +954,11 @@ class IAdapterRegistry(Interface):
 
 # begin formerly in zope.component
 
-
 class ComponentLookupError(LookupError):
     """A component could not be found."""
 
-
 class Invalid(Exception):
     """A component doesn't satisfy a promise."""
-
 
 class IObjectEvent(Interface):
     """An event related to an object.
@@ -992,7 +973,7 @@ class IObjectEvent(Interface):
 @implementer(IObjectEvent)
 class ObjectEvent:
 
-    def __init__(self, object):  # pylint:disable=redefined-builtin
+    def __init__(self, object): # pylint:disable=redefined-builtin
         self.object = object
 
 
@@ -1009,17 +990,13 @@ class IComponentLookup(Interface):
     utilities = Attribute(
         "Adapter Registry to manage all registered utilities.")
 
-    def queryAdapter(
-        object, interface, name='', default=None
-    ):  # pylint:disable=redefined-builtin
+    def queryAdapter(object, interface, name='', default=None): # pylint:disable=redefined-builtin
         """Look for a named adapter to an interface for an object
 
         If a matching adapter cannot be found, returns the default.
         """
 
-    def getAdapter(
-        object, interface, name=''
-    ):  # pylint:disable=redefined-builtin
+    def getAdapter(object, interface, name=''): # pylint:disable=redefined-builtin
         """Look for a named adapter to an interface for an object
 
         If a matching adapter cannot be found, a `ComponentLookupError`
@@ -1081,7 +1058,6 @@ class IComponentLookup(Interface):
         returned.
         """
 
-
 class IRegistration(Interface):
     """A registration-information object
     """
@@ -1097,7 +1073,6 @@ class IRegistration(Interface):
     commentary or information about the source of the configuration.
     """)
 
-
 class IUtilityRegistration(IRegistration):
     """Information about the registration of a utility
     """
@@ -1105,7 +1080,6 @@ class IUtilityRegistration(IRegistration):
     factory = Attribute("The factory used to create the utility. Optional.")
     component = Attribute("The object registered")
     provided = Attribute("The interface provided by the component")
-
 
 class _IBaseAdapterRegistration(IRegistration):
     """Information about the registration of an adapter
@@ -1125,16 +1099,13 @@ class _IBaseAdapterRegistration(IRegistration):
     This interface is implemented by the factory
     """)
 
-
 class IAdapterRegistration(_IBaseAdapterRegistration):
     """Information about the registration of an adapter
     """
 
-
 class ISubscriptionAdapterRegistration(_IBaseAdapterRegistration):
     """Information about the registration of a subscription adapter
     """
-
 
 class IHandlerRegistration(IRegistration):
 
@@ -1147,7 +1118,6 @@ class IHandlerRegistration(IRegistration):
     positional arguments, that provide these interfaces.
     """)
 
-
 class IRegistrationEvent(IObjectEvent):
     """An event that involves a registration"""
 
@@ -1156,25 +1126,20 @@ class IRegistrationEvent(IObjectEvent):
 class RegistrationEvent(ObjectEvent):
     """There has been a change in a registration
     """
-
     def __repr__(self):
-        return f"{self.__class__.__name__} event:\n{self.object!r}"
-
+        return "{} event:\n{!r}".format(self.__class__.__name__, self.object)
 
 class IRegistered(IRegistrationEvent):
     """A component or factory was registered
     """
 
-
 @implementer(IRegistered)
 class Registered(RegistrationEvent):
     pass
 
-
 class IUnregistered(IRegistrationEvent):
     """A component or factory was unregistered
     """
-
 
 @implementer(IUnregistered)
 class Unregistered(RegistrationEvent):

@@ -1,10 +1,12 @@
-# Add x/html serialization to `Elementree`
+# markdown/searializers.py
+#
+# Add x/html serialization to Elementree
 # Taken from ElementTree 1.3 preview with slight modifications
 #
 # Copyright (c) 1999-2007 by Fredrik Lundh.  All rights reserved.
 #
 # fredrik@pythonware.com
-# https://www.pythonware.com/
+# http://www.pythonware.com
 #
 # --------------------------------------------------------------------
 # The ElementTree toolkit is
@@ -34,34 +36,38 @@
 # OF THIS SOFTWARE.
 # --------------------------------------------------------------------
 
-"""
-Python-Markdown provides two serializers which render [`ElementTree.Element`][xml.etree.ElementTree.Element]
-objects to a string of HTML. Both functions wrap the same underlying code with only a few minor
-differences as outlined below:
 
-1. Empty (self-closing) tags are rendered as `<tag>` for HTML and as `<tag />` for XHTML.
-2. Boolean attributes are rendered as `attrname` for HTML and as `attrname="attrname"` for XHTML.
-"""
-
-from __future__ import annotations
-
+from __future__ import absolute_import
+from __future__ import unicode_literals
 from xml.etree.ElementTree import ProcessingInstruction
-from xml.etree.ElementTree import Comment, ElementTree, Element, QName, HTML_EMPTY
+from . import util
 import re
-from typing import Callable, Literal, NoReturn
+ElementTree = util.etree.ElementTree
+QName = util.etree.QName
+if hasattr(util.etree, 'test_comment'):  # pragma: no cover
+    Comment = util.etree.test_comment
+else:  # pragma: no cover
+    Comment = util.etree.Comment
 
 __all__ = ['to_html_string', 'to_xhtml_string']
 
+HTML_EMPTY = ("area", "base", "basefont", "br", "col", "frame", "hr",
+              "img", "input", "isindex", "link", "meta", "param")
 RE_AMP = re.compile(r'&(?!(?:\#[0-9]+|\#x[0-9a-f]+|[0-9a-z]+);)', re.I)
 
+try:
+    HTML_EMPTY = set(HTML_EMPTY)
+except NameError:  # pragma: no cover
+    pass
 
-def _raise_serialization_error(text: str) -> NoReturn:  # pragma: no cover
+
+def _raise_serialization_error(text):  # pragma: no cover
     raise TypeError(
-        "cannot serialize {!r} (type {})".format(text, type(text).__name__)
+        "cannot serialize %r (type %s)" % (text, type(text).__name__)
         )
 
 
-def _escape_cdata(text) -> str:
+def _escape_cdata(text):
     # escape character data
     try:
         # it's worth avoiding do-nothing calls for strings that are
@@ -79,7 +85,7 @@ def _escape_cdata(text) -> str:
         _raise_serialization_error(text)
 
 
-def _escape_attrib(text: str) -> str:
+def _escape_attrib(text):
     # escape attribute value
     try:
         if "&" in text:
@@ -98,7 +104,7 @@ def _escape_attrib(text: str) -> str:
         _raise_serialization_error(text)
 
 
-def _escape_attrib_html(text: str) -> str:
+def _escape_attrib_html(text):
     # escape attribute value
     try:
         if "&" in text:
@@ -115,7 +121,7 @@ def _escape_attrib_html(text: str) -> str:
         _raise_serialization_error(text)
 
 
-def _serialize_html(write: Callable[[str], None], elem: Element, format: Literal["html", "xhtml"]) -> None:
+def _serialize_html(write, elem, format):
     tag = elem.tag
     text = elem.text
     if tag is Comment:
@@ -130,7 +136,7 @@ def _serialize_html(write: Callable[[str], None], elem: Element, format: Literal
     else:
         namespace_uri = None
         if isinstance(tag, QName):
-            # `QNAME` objects store their data as a string: `{uri}tag`
+            # QNAME objects store their data as a string: `{uri}tag`
             if tag.text[:1] == "{":
                 namespace_uri, tag = tag.text[1:].split("}", 1)
             else:
@@ -141,10 +147,10 @@ def _serialize_html(write: Callable[[str], None], elem: Element, format: Literal
             items = sorted(items)  # lexical order
             for k, v in items:
                 if isinstance(k, QName):
-                    # Assume a text only `QName`
+                    # Assume a text only QName
                     k = k.text
                 if isinstance(v, QName):
-                    # Assume a text only `QName`
+                    # Assume a text only QName
                     v = v.text
                 else:
                     v = _escape_attrib_html(v)
@@ -152,7 +158,7 @@ def _serialize_html(write: Callable[[str], None], elem: Element, format: Literal
                     # handle boolean attributes
                     write(" %s" % v)
                 else:
-                    write(' {}="{}"'.format(k, v))
+                    write(' %s="%s"' % (k, v))
         if namespace_uri:
             write(' xmlns="%s"' % (_escape_attrib(namespace_uri)))
         if format == "xhtml" and tag.lower() in HTML_EMPTY:
@@ -172,9 +178,9 @@ def _serialize_html(write: Callable[[str], None], elem: Element, format: Literal
         write(_escape_cdata(elem.tail))
 
 
-def _write_html(root: Element, format: Literal["html", "xhtml"] = "html") -> str:
+def _write_html(root, format="html"):
     assert root is not None
-    data: list[str] = []
+    data = []
     write = data.append
     _serialize_html(write, root, format)
     return "".join(data)
@@ -183,12 +189,9 @@ def _write_html(root: Element, format: Literal["html", "xhtml"] = "html") -> str
 # --------------------------------------------------------------------
 # public functions
 
-
-def to_html_string(element: Element) -> str:
-    """ Serialize element and its children to a string of HTML5. """
+def to_html_string(element):
     return _write_html(ElementTree(element).getroot(), format="html")
 
 
-def to_xhtml_string(element: Element) -> str:
-    """ Serialize element and its children to a string of XHTML. """
+def to_xhtml_string(element):
     return _write_html(ElementTree(element).getroot(), format="xhtml")

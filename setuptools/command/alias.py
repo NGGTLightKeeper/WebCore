@@ -1,6 +1,6 @@
-from setuptools.command.setopt import config_file, edit_config, option_base
-
 from distutils.errors import DistutilsOptionError
+
+from setuptools.command.setopt import edit_config, option_base, config_file
 
 
 def shquote(arg):
@@ -34,7 +34,8 @@ class alias(option_base):
         option_base.finalize_options(self)
         if self.remove and len(self.args) != 1:
             raise DistutilsOptionError(
-                "Must specify exactly one argument (the alias name) when using --remove"
+                "Must specify exactly one argument (the alias name) when "
+                "using --remove"
             )
 
     def run(self):

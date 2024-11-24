@@ -290,7 +290,6 @@ class CMySQLConnection(MySQLConnectionAbstract):
                 if isinstance(self._webauthn_callback, str)
                 else self._webauthn_callback
             ),
-            "openid_token_file": self._openid_token_file,
         }
 
         tls_versions = self._ssl.get("tls_versions")
@@ -298,9 +297,9 @@ class CMySQLConnection(MySQLConnectionAbstract):
             tls_versions.sort(reverse=True)  # type: ignore[union-attr]
             tls_versions = ",".join(tls_versions)
         if self._ssl.get("tls_ciphersuites") is not None:
-            ssl_ciphersuites = (
-                self._ssl.get("tls_ciphersuites")[0] or None  # type: ignore[index]
-            )  # if it's the empty string, then use `None` instead
+            ssl_ciphersuites = self._ssl.get("tls_ciphersuites")[  # type: ignore[index]
+                0
+            ]
             tls_ciphersuites = self._ssl.get("tls_ciphersuites")[  # type: ignore[index]
                 1
             ]
@@ -855,7 +854,7 @@ class CMySQLConnection(MySQLConnectionAbstract):
 
     def prepare_for_mysql(
         self, params: ParamsSequenceOrDictType
-    ) -> Union[Sequence[bytes], Dict[bytes, bytes]]:
+    ) -> Union[Sequence[bytes], Dict[str, bytes]]:
         """Prepare parameters for statements
 
         This method is use by cursors to prepared parameters found in the
@@ -863,7 +862,7 @@ class CMySQLConnection(MySQLConnectionAbstract):
 
         Returns dict.
         """
-        result: Union[List[bytes], Dict[bytes, bytes]] = []
+        result: Union[List[Any], Dict[str, Any]] = []
         if isinstance(params, (list, tuple)):
             if self.converter:
                 result = [
@@ -880,14 +879,14 @@ class CMySQLConnection(MySQLConnectionAbstract):
             result = {}
             if self.converter:
                 for key, value in params.items():
-                    result[key.encode()] = self.converter.quote(
+                    result[key] = self.converter.quote(
                         self.converter.escape(
                             self.converter.to_mysql(value), self._sql_mode
                         )
                     )
             else:
                 for key, value in params.items():
-                    result[key.encode()] = self._cmysql.convert_to_mysql(value)[0]
+                    result[key] = self._cmysql.convert_to_mysql(value)[0]
         else:
             raise ProgrammingError(
                 f"Could not process parameters: {type(params).__name__}({params}),"
@@ -914,7 +913,6 @@ class CMySQLConnection(MySQLConnectionAbstract):
         password3: str = "",
         oci_config_file: Optional[str] = None,
         oci_config_profile: Optional[str] = None,
-        openid_token_file: Optional[str] = None,
     ) -> None:
         """Change the current logged in user"""
         try:
@@ -927,7 +925,6 @@ class CMySQLConnection(MySQLConnectionAbstract):
                 password3,
                 oci_config_file,
                 oci_config_profile,
-                openid_token_file,
             )
 
         except MySQLInterfaceError as err:

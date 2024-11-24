@@ -1,50 +1,48 @@
 """PyPI and direct package downloading."""
 
-import base64
-import configparser
-import hashlib
-import html
-import http.client
-import io
-import itertools
+import sys
+import subprocess
 import os
 import re
+import io
 import shutil
 import socket
-import subprocess
-import sys
-import urllib.error
+import base64
+import hashlib
+import itertools
+import configparser
+import html
+import http.client
 import urllib.parse
 import urllib.request
-from fnmatch import translate
+import urllib.error
 from functools import wraps
-from typing import NamedTuple
-
-from more_itertools import unique_everseen
 
 import setuptools
 from pkg_resources import (
-    BINARY_DIST,
     CHECKOUT_DIST,
-    DEVELOP_DIST,
-    EGG_DIST,
-    SOURCE_DIST,
     Distribution,
-    Environment,
-    Requirement,
-    find_distributions,
+    BINARY_DIST,
     normalize_path,
-    parse_version,
+    SOURCE_DIST,
+    Environment,
+    find_distributions,
     safe_name,
     safe_version,
     to_filename,
+    Requirement,
+    DEVELOP_DIST,
+    EGG_DIST,
+    parse_version,
 )
-from setuptools.wheel import Wheel
-
-from .unicode_utils import _cfg_read_utf8_with_fallback, _read_utf8_with_fallback
-
 from distutils import log
 from distutils.errors import DistutilsError
+from fnmatch import translate
+from setuptools.wheel import Wheel
+from setuptools.extern.more_itertools import unique_everseen
+
+from .unicode_utils import _read_utf8_with_fallback, _cfg_read_utf8_with_fallback
+
 
 EGG_FRAGMENT = re.compile(r'^egg=([-A-Za-z0-9_.+!]+)$')
 HREF = re.compile(r"""href\s*=\s*['"]?([^'"> ]+)""", re.I)
@@ -303,20 +301,20 @@ class PackageIndex(Environment):
 
     def __init__(
         self,
-        index_url: str = "https://pypi.org/simple/",
+        index_url="https://pypi.org/simple/",
         hosts=('*',),
         ca_bundle=None,
-        verify_ssl: bool = True,
+        verify_ssl=True,
         *args,
         **kw,
     ):
         super().__init__(*args, **kw)
         self.index_url = index_url + "/"[: not index_url.endswith('/')]
-        self.scanned_urls: dict = {}
-        self.fetched_urls: dict = {}
-        self.package_pages: dict = {}
+        self.scanned_urls = {}
+        self.fetched_urls = {}
+        self.package_pages = {}
         self.allows = re.compile('|'.join(map(translate, hosts))).match
-        self.to_scan: list = []
+        self.to_scan = []
         self.opener = urllib.request.urlopen
 
     def add(self, dist):
@@ -328,7 +326,7 @@ class PackageIndex(Environment):
         return super().add(dist)
 
     # FIXME: 'PackageIndex.process_url' is too complex (14)
-    def process_url(self, url, retrieve: bool = False):  # noqa: C901
+    def process_url(self, url, retrieve=False):  # noqa: C901
         """Evaluate a URL as a possible download, and maybe retrieve it"""
         if url in self.scanned_urls and not retrieve:
             return
@@ -381,7 +379,7 @@ class PackageIndex(Environment):
         if url.startswith(self.index_url) and getattr(f, 'code', None) != 404:
             page = self.process_index(url, page)
 
-    def process_filename(self, fn, nested: bool = False):
+    def process_filename(self, fn, nested=False):
         # process filenames or directories
         if not os.path.exists(fn):
             self.warn("Not found: %s", fn)
@@ -397,7 +395,7 @@ class PackageIndex(Environment):
             self.debug("Found: %s", fn)
             list(map(self.add, dists))
 
-    def url_ok(self, url, fatal: bool = False):
+    def url_ok(self, url, fatal=False):
         s = URL_SCHEME(url)
         is_file = s and s.group(1).lower() == 'file'
         if is_file or self.allows(urllib.parse.urlparse(url)[1]):
@@ -561,7 +559,10 @@ class PackageIndex(Environment):
         if self[requirement.key]:  # we've seen at least one distro
             meth, msg = self.info, "Couldn't retrieve index page for %r"
         else:  # no distros seen for this name, might be misspelled
-            meth, msg = self.warn, "Couldn't find index page for %r (maybe misspelled?)"
+            meth, msg = (
+                self.warn,
+                "Couldn't find index page for %r (maybe misspelled?)",
+            )
         meth(msg, requirement.unsafe_name)
         self.scan_all()
 
@@ -603,9 +604,9 @@ class PackageIndex(Environment):
         self,
         requirement,
         tmpdir,
-        force_scan: bool = False,
-        source: bool = False,
-        develop_ok: bool = False,
+        force_scan=False,
+        source=False,
+        develop_ok=False,
         local_index=None,
     ):
         """Obtain a distribution suitable for fulfilling `requirement`
@@ -681,9 +682,7 @@ class PackageIndex(Environment):
             self.info("Best match: %s", dist)
             return dist.clone(location=dist.download_location)
 
-    def fetch(
-        self, requirement, tmpdir, force_scan: bool = False, source: bool = False
-    ):
+    def fetch(self, requirement, tmpdir, force_scan=False, source=False):
         """Obtain a file suitable for fulfilling `requirement`
 
         DEPRECATED; use the ``fetch_distribution()`` method now instead.  For
@@ -1001,20 +1000,21 @@ def _encode_auth(auth):
     return encoded.replace('\n', '')
 
 
-class Credential(NamedTuple):
+class Credential:
     """
-    A username/password pair.
-
-    Displayed separated by `:`.
-    >>> str(Credential('username', 'password'))
-    'username:password'
+    A username/password pair. Use like a namedtuple.
     """
 
-    username: str
-    password: str
+    def __init__(self, username, password):
+        self.username = username
+        self.password = password
 
-    def __str__(self) -> str:
-        return f'{self.username}:{self.password}'
+    def __iter__(self):
+        yield self.username
+        yield self.password
+
+    def __str__(self):
+        return '%(username)s:%(password)s' % vars(self)
 
 
 class PyPIConfig(configparser.RawConfigParser):
@@ -1071,7 +1071,7 @@ def open_with_auth(url, opener=urllib.request.urlopen):
     if scheme in ('http', 'https'):
         auth, address = _splituser(netloc)
     else:
-        auth, address = (None, None)
+        auth = None
 
     if not auth:
         cred = PyPIConfig().find_credential(url)

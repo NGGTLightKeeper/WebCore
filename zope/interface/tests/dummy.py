@@ -19,7 +19,6 @@ from zope.interface.tests.idummy import IDummyModule
 
 moduleProvides(IDummyModule)
 
-
 def bar(baz):
     # Note:  no 'self', because the module provides the interface directly.
     raise NotImplementedError()

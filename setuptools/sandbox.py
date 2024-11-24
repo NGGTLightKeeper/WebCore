@@ -1,33 +1,31 @@
 from __future__ import annotations
 
-import builtins
-import contextlib
-import functools
-import itertools
-import operator
 import os
-import pickle
-import re
 import sys
 import tempfile
+import operator
+import functools
+import itertools
+import re
+import contextlib
+import pickle
 import textwrap
-from types import TracebackType
-from typing import TYPE_CHECKING
+import builtins
 
 import pkg_resources
+from distutils.errors import DistutilsError
 from pkg_resources import working_set
 
-from distutils.errors import DistutilsError
-
 if sys.platform.startswith('java'):
-    import org.python.modules.posix.PosixModule as _os  # pyright: ignore[reportMissingImports]
+    import org.python.modules.posix.PosixModule as _os
 else:
     _os = sys.modules[os.name]
+try:
+    _file = file  # type: ignore[name-defined] # Check for global variable
+except NameError:
+    _file = None
 _open = open
 
-
-if TYPE_CHECKING:
-    from typing_extensions import Self
 
 __all__ = [
     "AbstractSandbox",
@@ -123,15 +121,10 @@ class ExceptionSaver:
     later.
     """
 
-    def __enter__(self) -> Self:
+    def __enter__(self):
         return self
 
-    def __exit__(
-        self,
-        type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> bool:
+    def __exit__(self, type, exc, tb):
         if not exc:
             return False
 
@@ -288,18 +281,17 @@ class AbstractSandbox:
         for name in self._attrs:
             setattr(os, name, getattr(source, name))
 
-    def __enter__(self) -> None:
+    def __enter__(self):
         self._copy(self)
+        if _file:
+            builtins.file = self._file
         builtins.open = self._open
         self._active = True
 
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ):
+    def __exit__(self, exc_type, exc_value, traceback):
         self._active = False
+        if _file:
+            builtins.file = _file
         builtins.open = _open
         self._copy(_os)
 
@@ -332,6 +324,8 @@ class AbstractSandbox:
 
         return wrap
 
+    if _file:
+        _file = _mk_single_path_wrapper('file', _file)
     _open = _mk_single_path_wrapper('open', _open)
     for __name in [
         "stat",
@@ -416,7 +410,7 @@ else:
 class DirectorySandbox(AbstractSandbox):
     """Restrict operations to a single subdirectory - pseudo-chroot"""
 
-    write_ops: dict[str, None] = dict.fromkeys([
+    write_ops = dict.fromkeys([
         "open",
         "chmod",
         "chown",
@@ -447,6 +441,13 @@ class DirectorySandbox(AbstractSandbox):
         from setuptools.sandbox import SandboxViolation
 
         raise SandboxViolation(operation, args, kw)
+
+    if _file:
+
+        def _file(self, path, mode='r', *args, **kw):
+            if mode not in ('r', 'rt', 'rb', 'rU', 'U') and not self._ok(path):
+                self._violation("file", path, mode, *args, **kw)
+            return _file(path, mode, *args, **kw)
 
     def _open(self, path, mode='r', *args, **kw):
         if mode not in ('r', 'rt', 'rb', 'rU', 'U') and not self._ok(path):
@@ -491,7 +492,7 @@ class DirectorySandbox(AbstractSandbox):
             self._violation(operation, src, dst, *args, **kw)
         return (src, dst)
 
-    def open(self, file, flags, mode: int = 0o777, *args, **kw):
+    def open(self, file, flags, mode=0o777, *args, **kw):
         """Called for low-level os.open()"""
         if flags & WRITE_FLAGS and not self._ok(file):
             self._violation("os.open", file, flags, mode, *args, **kw)
@@ -524,6 +525,6 @@ class SandboxViolation(DistutilsError):
         """
     ).lstrip()
 
-    def __str__(self) -> str:
+    def __str__(self):
         cmd, args, kwargs = self.args
         return self.tmpl.format(**locals())

@@ -41,7 +41,7 @@ class ObjectEventTests(unittest.TestCase, _ConformsToIObjectEvent):
     def test_ctor(self):
         target = object()
         event = self._makeOne(target)
-        self.assertIs(event.object, target)
+        self.assertTrue(event.object is target)
 
 
 class RegistrationEventTests(unittest.TestCase,
@@ -125,6 +125,4 @@ class InterfaceClassTests(unittest.TestCase):
         from zope.interface import implementedBy
         from zope.interface import ro
 
-        self.assertTrue(
-            ro.is_consistent(implementedBy(self._getTargetClass()))
-        )
+        self.assertTrue(ro.is_consistent(implementedBy(self._getTargetClass())))

@@ -1,9 +1,12 @@
-from ..dist import Distribution
-from ..modified import newer_pairwise_group
-
 import distutils.command.build_clib as orig
-from distutils import log
 from distutils.errors import DistutilsSetupError
+from distutils import log
+
+try:
+    from distutils._modified import newer_pairwise_group
+except ImportError:
+    # fallback for SETUPTOOLS_USE_DISTUTILS=stdlib
+    from .._distutils._modified import newer_pairwise_group
 
 
 class build_clib(orig.build_clib):
@@ -21,8 +24,6 @@ class build_clib(orig.build_clib):
         * cflags   - specify a list of additional flags to pass to
                      the compiler.
     """
-
-    distribution: Distribution  # override distutils.dist.Distribution with setuptools.dist.Distribution
 
     def build_libraries(self, libraries):
         for lib_name, build_info in libraries:

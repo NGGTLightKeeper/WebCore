@@ -43,7 +43,7 @@ from ..protocol import (
     MySQLProtocol as _MySQLProtocol,
 )
 from ..types import BinaryProtocolType, DescriptionType, EofPacketType, HandShakeType
-from ..utils import lc_int, read_lc_string_list
+from ..utils import int1store, read_lc_string_list
 from .network import MySQLSocket
 from .plugins import MySQLAuthPlugin, get_auth_plugin
 from .plugins.caching_sha2_password import MySQLCachingSHA2PasswordAuthPlugin
@@ -60,6 +60,7 @@ class MySQLProtocol(_MySQLProtocol):
         auth_data: bytes,
         username: str,
         password: str,
+        client_flags: int,
         auth_plugin: str,
         auth_plugin_class: Optional[str] = None,
         ssl_enabled: bool = False,
@@ -89,7 +90,7 @@ class MySQLProtocol(_MySQLProtocol):
         Raises:
             InterfaceError: If authentication fails or when got a NULL auth response.
         """
-        if not password and auth_plugin == "":
+        if not password:
             # return auth response and an arbitrary auth strategy
             return b"\x00", MySQLCachingSHA2PasswordAuthPlugin(
                 username, password, ssl_enabled=ssl_enabled
@@ -112,7 +113,11 @@ class MySQLProtocol(_MySQLProtocol):
                 f"plugin {auth_strategy.name}"
             )
 
-        auth_response = lc_int(len(auth_response)) + auth_response
+        auth_response = (
+            int1store(len(auth_response)) + auth_response
+            if client_flags & ClientFlag.SECURE_CONNECTION
+            else auth_response + b"\x00"
+        )
 
         return auth_response, auth_strategy
 
@@ -198,10 +203,10 @@ class MySQLProtocol(_MySQLProtocol):
                 )
             )
         else:
-            filler = "x" * 23
+            filler = "x" * 22
             response_payload.append(
                 struct.pack(
-                    f"<IIB{filler}{len(b_username)}sx",
+                    f"<IIH{filler}{len(b_username)}sx",
                     client_flags,
                     max_allowed_packet,
                     charset,
@@ -214,6 +219,7 @@ class MySQLProtocol(_MySQLProtocol):
             auth_data=handshake["auth_data"],  # type: ignore[arg-type]
             username=username,
             password=password,
+            client_flags=client_flags,
             auth_plugin=auth_plugin,
             auth_plugin_class=auth_plugin_class,
             ssl_enabled=ssl_enabled,

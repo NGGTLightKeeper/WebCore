@@ -2,30 +2,20 @@
 
 Build .egg distributions"""
 
-from __future__ import annotations
-
-import marshal
+from distutils.dir_util import remove_tree, mkpath
+from distutils import log
+from types import CodeType
+import sys
 import os
 import re
-import sys
 import textwrap
-from sysconfig import get_path, get_python_version
-from types import CodeType
-from typing import TYPE_CHECKING, Literal
+import marshal
 
-from setuptools import Command
 from setuptools.extension import Library
-
+from setuptools import Command
 from .._path import ensure_directory
 
-from distutils import log
-from distutils.dir_util import mkpath, remove_tree
-
-if TYPE_CHECKING:
-    from typing_extensions import TypeAlias
-
-# Same as zipfile._ZipFileMode from typeshed
-_ZipFileMode: TypeAlias = Literal["r", "w", "x", "a"]
+from sysconfig import get_path, get_python_version
 
 
 def _get_purelib():
@@ -440,12 +430,7 @@ INSTALL_DIRECTORY_ATTRS = ['install_lib', 'install_dir', 'install_data', 'instal
 
 
 def make_zipfile(
-    zip_filename,
-    base_dir,
-    verbose: bool = False,
-    dry_run: bool = False,
-    compress=True,
-    mode: _ZipFileMode = 'w',
+    zip_filename, base_dir, verbose=False, dry_run=False, compress=True, mode='w'
 ):
     """Create a zip file from all the files under 'base_dir'.  The output
     zip file will be named 'base_dir' + ".zip".  Uses either the "zipfile"
