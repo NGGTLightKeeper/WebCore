@@ -45,6 +45,8 @@ except ImportError:
 from typing import TYPE_CHECKING, Any, Callable, Tuple
 
 if TYPE_CHECKING:
+    from mysql.connector.aio.abstracts import MySQLConnectionAbstract
+
     __all__.append("StreamWriter")
 
 

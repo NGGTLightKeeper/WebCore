@@ -1,4 +1,4 @@
-# Copyright (c) 2009, 2024, Oracle and/or its affiliates.
+# Copyright (c) 2009, 2025, Oracle and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0, as
@@ -77,8 +77,10 @@ PROTOCOL_VERSION = 10
 AUTH_SWITCH_STATUS = 0xFE
 EXCHANGE_FURTHER_STATUS = 0x01
 OK_STATUS = 0x00
+EOF_STATUS = 0xFE
 MFA_STATUS = 0x02
 ERR_STATUS = 0xFF
+LOCAL_INFILE_STATUS = 0xFB
 DEFAULT_CHARSET_ID = 45
 DEFAULT_MAX_ALLOWED_PACKET = 1073741824
 
@@ -611,7 +613,11 @@ class MySQLProtocol:
         return res
 
     def read_text_result(
-        self, sock: MySQLSocket, version: Tuple[int, ...], count: int = 1
+        self,
+        sock: MySQLSocket,
+        version: Tuple[int, ...],
+        count: int = 1,
+        read_timeout: Optional[int] = None,
     ) -> Tuple[
         List[Tuple[Optional[bytes], ...]],
         Optional[EofPacketType],
@@ -632,13 +638,13 @@ class MySQLProtocol:
         while True:
             if eof or i == count:
                 break
-            packet = sock.recv()
+            packet = sock.recv(read_timeout)
             if packet.startswith(b"\xff\xff\xff"):
                 datas = [packet[4:]]
-                packet = sock.recv()
+                packet = sock.recv(read_timeout)
                 while packet.startswith(b"\xff\xff\xff"):
                     datas.append(packet[4:])
-                    packet = sock.recv()
+                    packet = sock.recv(read_timeout)
                 datas.append(packet[4:])
                 rowdata = utils.read_lc_string_list(b"".join(datas))
             elif packet[4] == 254 and packet[0] < 7:
@@ -821,6 +827,7 @@ class MySQLProtocol:
         columns: List[DescriptionType],
         count: int = 1,
         charset: str = "utf-8",
+        read_timeout: Optional[int] = None,
     ) -> Tuple[
         List[Tuple[BinaryProtocolType, ...]],
         Optional[EofPacketType],
@@ -838,7 +845,7 @@ class MySQLProtocol:
                 break
             if i == count:
                 break
-            packet = bytes(sock.recv())
+            packet = bytes(sock.recv(read_timeout))
             if packet[4] == 254:
                 eof = self.parse_eof(packet)
                 values = None
@@ -906,7 +913,7 @@ class MySQLProtocol:
 
     @staticmethod
     def prepare_binary_timestamp(
-        value: Union[datetime.date, datetime.datetime]
+        value: Union[datetime.date, datetime.datetime],
     ) -> Tuple[bytes, int]:
         """Prepare a timestamp object for the MySQL binary protocol
 
@@ -949,7 +956,7 @@ class MySQLProtocol:
 
     @staticmethod
     def prepare_binary_time(
-        value: Union[datetime.timedelta, datetime.time]
+        value: Union[datetime.timedelta, datetime.time],
     ) -> Tuple[bytes, int]:
         """Prepare a time object for the MySQL binary protocol
 

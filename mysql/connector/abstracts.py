@@ -1,4 +1,4 @@
-# Copyright (c) 2014, 2024, Oracle and/or its affiliates.
+# Copyright (c) 2014, 2025, Oracle and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0, as
@@ -46,6 +46,8 @@ from typing import (
     Any,
     BinaryIO,
     Callable,
+    ClassVar,
+    Deque,
     Dict,
     Generator,
     Iterator,
@@ -57,6 +59,7 @@ from typing import (
     Tuple,
     Type,
     Union,
+    cast,
 )
 
 TLS_V1_3_SUPPORTED = False
@@ -72,6 +75,7 @@ except ImportError:
 from .constants import (
     CONN_ATTRS_DN,
     DEFAULT_CONFIGURATION,
+    DEPRECATED_METHOD_WARNING,
     MYSQL_DEFAULT_CHARSET_ID_57,
     MYSQL_DEFAULT_CHARSET_ID_80,
     OPENSSL_CS_NAMES,
@@ -104,6 +108,7 @@ if OTEL_ENABLED:
         trace,
     )
 
+from ._decorating import deprecated
 from .optionfiles import read_option_files
 from .tls_ciphers import UNACCEPTABLE_TLS_CIPHERSUITES, UNACCEPTABLE_TLS_VERSIONS
 from .types import (
@@ -113,14 +118,13 @@ from .types import (
     EofPacketType,
     HandShakeType,
     MySQLConvertibleType,
+    MySQLScriptPartition,
     RowItemType,
     RowType,
     StrOrBytes,
     WarningType,
 )
 from .utils import GenericWrapper, import_object
-
-NAMED_TUPLE_CACHE: weakref.WeakValueDictionary[Any, Any] = weakref.WeakValueDictionary()
 
 DUPLICATED_IN_LIST_ERROR = (
     "The '{list}' list must not contain repeated values, the value "
@@ -228,6 +232,8 @@ class MySQLConnectionAbstract(ABC):
         self._connection_timeout: Optional[int] = DEFAULT_CONFIGURATION[
             "connect_timeout"
         ]
+        self._read_timeout: Optional[int] = DEFAULT_CONFIGURATION["read_timeout"]
+        self._write_timeout: Optional[int] = DEFAULT_CONFIGURATION["write_timeout"]
         self._buffered: bool = False
         self._unread_result: bool = False
         self._have_next_result: bool = False
@@ -253,6 +259,13 @@ class MySQLConnectionAbstract(ABC):
         self._consume_results: bool = False
         self._init_command: Optional[str] = None
         self._character_set: CharacterSet = CharacterSet()
+
+        self._local_infile_filenames: Optional[Deque[str]] = None
+        """Stores the filenames from `LOCAL INFILE` requests
+        found in the executed query."""
+
+        self._query: Optional[bytes] = None
+        """The query being processed."""
 
     def __enter__(self) -> MySQLConnectionAbstract:
         return self
@@ -586,7 +599,7 @@ class MySQLConnectionAbstract(ABC):
         # Configure client flags
         try:
             default = ClientFlag.get_default()
-            self.set_client_flags(config["client_flags"] or default)
+            self.client_flags = config["client_flags"] or default
             del config["client_flags"]
         except KeyError:
             pass  # Missing client_flags-argument is OK
@@ -594,7 +607,7 @@ class MySQLConnectionAbstract(ABC):
         try:
             if config["compress"]:
                 self._compress = True
-                self.set_client_flags([ClientFlag.COMPRESS])
+                self.client_flags = [ClientFlag.COMPRESS]
         except KeyError:
             pass  # Missing compress argument is OK
 
@@ -616,9 +629,9 @@ class MySQLConnectionAbstract(ABC):
             ):
                 raise AttributeError("allow_local_infile_in_path must be a directory")
         if self._allow_local_infile or self._allow_local_infile_in_path:
-            self.set_client_flags([ClientFlag.LOCAL_FILES])
+            self.client_flags = [ClientFlag.LOCAL_FILES]
         else:
-            self.set_client_flags([-ClientFlag.LOCAL_FILES])
+            self.client_flags = [-ClientFlag.LOCAL_FILES]
 
         try:
             if not config["consume_results"]:
@@ -644,7 +657,7 @@ class MySQLConnectionAbstract(ABC):
 
         # Set converter class
         try:
-            self.set_converter_class(config["converter_class"])
+            self.converter_class = config["converter_class"]
         except KeyError:
             pass  # Using default converter class
         except TypeError as err:
@@ -865,6 +878,15 @@ class MySQLConnectionAbstract(ABC):
                     "does not exist"
                 )
 
+        if config.get("read_timeout") is not None:
+            self._read_timeout = config["read_timeout"]
+            if not isinstance(self._read_timeout, int) or self._read_timeout < 0:
+                raise InterfaceError("Option read_timeout must be a positive integer")
+        if config.get("write_timeout") is not None:
+            self._write_timeout = config["write_timeout"]
+            if not isinstance(self._write_timeout, int) or self._write_timeout < 0:
+                raise InterfaceError("Option write_timeout must be a positive integer")
+
     def _add_default_conn_attrs(self) -> None:
         """Adds the default connection attributes."""
 
@@ -929,6 +951,7 @@ class MySQLConnectionAbstract(ABC):
 
         return version
 
+    @deprecated(DEPRECATED_METHOD_WARNING.format(property_name="server_version"))
     def get_server_version(self) -> Optional[Tuple[int, ...]]:
         """Gets the MySQL version.
 
@@ -938,8 +961,29 @@ class MySQLConnectionAbstract(ABC):
         """
         return self._server_version
 
+    @deprecated(DEPRECATED_METHOD_WARNING.format(property_name="server_info"))
     def get_server_info(self) -> Optional[str]:
         """Gets the original MySQL version information.
+
+        Returns:
+            The original MySQL server as text. If not previously connected, it will
+            return `None`.
+        """
+        return self.server_info
+
+    @property
+    def server_version(self) -> Optional[Tuple[int, ...]]:
+        """Gets the MySQL Server version the connector is connected to.
+
+        Returns:
+            The MySQL server version as a tuple. If not previously connected, it will
+            return `None`.
+        """
+        return self._server_version
+
+    @property
+    def server_info(self) -> Optional[str]:
+        """Gets the original MySQL server version information.
 
         Returns:
             The original MySQL server as text. If not previously connected, it will
@@ -972,6 +1016,7 @@ class MySQLConnectionAbstract(ABC):
             ```
         """
 
+    @deprecated(DEPRECATED_METHOD_WARNING.format(property_name="client_flags"))
     def set_client_flags(self, flags: Union[int, Sequence[int]]) -> int:
         """Sets the client flags.
 
@@ -1000,6 +1045,40 @@ class MySQLConnectionAbstract(ABC):
             >>> cnx.reconnect()
             ```
         """
+        self.client_flags = flags
+        return self.client_flags
+
+    @property
+    def client_flags(self) -> int:
+        """Gets the client flags of the current session."""
+        return self._client_flags
+
+    @client_flags.setter
+    def client_flags(self, flags: Union[int, Sequence[int]]) -> None:
+        """Sets the client flags.
+
+        The flags-argument can be either an int or a list (or tuple) of
+        ClientFlag-values. If it is an integer, it will set client_flags
+        to flags as is.
+
+        If flags is a sequence, each item in the sequence sets the flag when the
+        value is positive or unsets it when negative (see example below).
+
+        Args:
+            flags: A list (or tuple), each flag will be set or unset when it's negative.
+
+        Raises:
+            ProgrammingError: When the flags argument is not a set or an integer
+                              bigger than 0.
+
+        Examples:
+            ```
+            For example, to unset `LONG_FLAG` and set the `FOUND_ROWS` flags:
+            >>> from mysql.connector.constants import ClientFlag
+            >>> cnx.client_flags = [ClientFlag.FOUND_ROWS, -ClientFlag.LONG_FLAG]
+            >>> cnx.reconnect()
+            ```
+        """
         if isinstance(flags, int) and flags > 0:
             self._client_flags = flags
         elif isinstance(flags, (tuple, list)):
@@ -1009,8 +1088,7 @@ class MySQLConnectionAbstract(ABC):
                 else:
                     self._client_flags |= flag
         else:
-            raise ProgrammingError("set_client_flags expect integer (>0) or set")
-        return self._client_flags
+            raise ProgrammingError("client_flags setter expect integer (>0) or set")
 
     def shutdown(self) -> NoReturn:
         """Shuts down connection to MySQL Server.
@@ -1109,17 +1187,28 @@ class MySQLConnectionAbstract(ABC):
         else:
             self._password = ""
 
+    @deprecated(DEPRECATED_METHOD_WARNING.format(property_name="use_unicode"))
     def set_unicode(self, value: bool = True) -> None:
-        """Toggles unicode mode.
-
-        Sets whether we return string fields as unicode or not.
+        """Sets whether we return string fields as unicode or not.
 
         Args:
             value: A boolean - default is `True`.
         """
-        self._use_unicode = value
-        if self.converter:
-            self.converter.set_unicode(value)
+        self.use_unicode = value
+
+    @property
+    def use_unicode(self) -> bool:
+        """Gets whether we return string fields as unicode or not."""
+        return self._use_unicode
+
+    @use_unicode.setter
+    @abstractmethod
+    def use_unicode(self, value: bool) -> None:
+        """Sets whether we return string fields as unicode or not.
+
+        Args:
+            value: A boolean - default is `True`.
+        """
 
     @property
     def autocommit(self) -> bool:
@@ -1356,6 +1445,96 @@ class MySQLConnectionAbstract(ABC):
             self.converter.set_charset(charset_name, character_set=self._character_set)
 
     @property
+    def read_timeout(self) -> Optional[int]:
+        """
+        Gets the connection context's timeout in seconds for each attempt
+        to read any data from the server.
+
+        `read_timeout` is number of seconds upto which the connector should wait
+        for the server to reply back before raising an ReadTimeoutError. We can set
+        this option to None, which would signal the connector to wait indefinitely
+        till the read operation is completed or stopped abruptly.
+        """
+        return self._read_timeout
+
+    @read_timeout.setter
+    def read_timeout(self, timeout: Optional[int]) -> None:
+        """
+        Sets or updates the connection context's timeout in seconds for each attempt
+        to read any data from the server.
+
+        `read_timeout` is number of seconds upto which the connector should wait
+        for the server to reply back before raising an ReadTimeoutError. We can set
+        this option to None, which would signal the connector to wait indefinitely
+        till the read operation is completed or stopped abruptly.
+
+        Args:
+            timeout: Accepts a non-negative integer which is the timeout to be set
+                     in seconds or None.
+        Raises:
+            InterfaceError: If a positive integer or None is not passed via the
+                            timeout parameter.
+        Examples:
+            The following will set the read_timeout of the current session to
+            5 seconds:
+            ```
+            >>> cnx = mysql.connector.connect(user='scott')
+            >>> cnx.read_timeout = 5
+            ```
+        """
+        if timeout is not None:
+            if not isinstance(timeout, int) or timeout < 0:
+                raise InterfaceError(
+                    "Option read_timeout must be a positive integer or None"
+                )
+        self._read_timeout = timeout
+
+    @property
+    def write_timeout(self) -> Optional[int]:
+        """
+        Gets the connection context's timeout in seconds for each attempt
+        to send data to the server.
+
+        `write_timeout` is number of seconds upto which the connector should spend to
+        write to the server before raising an WriteTimeoutError. We can set this option
+        to None, which would signal the connector to wait indefinitely till the write
+        operation is completed or stopped abruptly.
+        """
+        return self._write_timeout
+
+    @write_timeout.setter
+    def write_timeout(self, timeout: Optional[int]) -> None:
+        """
+        Sets or updates the connection context's timeout in seconds for each attempt
+        to send data to the server.
+
+        `write_timeout` is number of seconds upto which the connector should spend to
+        write to the server before raising an WriteTimeoutError. We can set this option
+        to None, which would signal the connector to wait indefinitely till the write
+        operation is completed or stopped abruptly.
+
+        Args:
+            timeout: Accepts a non-negative integer which is the timeout to be set in
+                     seconds or None.
+        Raises:
+            InterfaceError: If a positive integer or None is not passed via the
+                            timeout parameter.
+        Examples:
+            The following will set the write_timeout of the current
+            session to 5 seconds:
+            ```
+            >>> cnx = mysql.connector.connect(user='scott')
+            >>> cnx.write_timeout = 5
+            ```
+        """
+        if timeout is not None:
+            if not isinstance(timeout, int) or timeout < 0:
+                raise InterfaceError(
+                    "Option write_timeout must be a positive integer or None"
+                )
+        self._write_timeout = timeout
+
+    @property
     @abstractmethod
     def connection_id(self) -> Optional[int]:
         """MySQL connection ID."""
@@ -1385,7 +1564,7 @@ class MySQLConnectionAbstract(ABC):
             self._execute_query(self._init_command)
 
     @abstractmethod
-    def disconnect(self) -> None:
+    def close(self) -> None:
         """Disconnects from the MySQL server.
 
         This method tries to send a `QUIT` command and close the socket. It raises
@@ -1398,7 +1577,7 @@ class MySQLConnectionAbstract(ABC):
         use `shutdown()`.
         """
 
-    close: Callable[[], Any] = disconnect
+    disconnect: ClassVar[Callable[["MySQLConnectionAbstract"], None]] = close
 
     def connect(self, **kwargs: Any) -> None:
         """Connects to the MySQL server.
@@ -1570,22 +1749,26 @@ class MySQLConnectionAbstract(ABC):
         prepared: Optional[bool] = None,
         cursor_class: Optional[Type["MySQLCursorAbstract"]] = None,
         dictionary: Optional[bool] = None,
-        named_tuple: Optional[bool] = None,
+        read_timeout: Optional[int] = None,
+        write_timeout: Optional[int] = None,
     ) -> "MySQLCursorAbstract":
         """Instantiates and returns a cursor.
 
         By default, `MySQLCursor` or `CMySQLCursor` is returned. Depending on the
         options while connecting, a buffered and/or raw cursor is instantiated
         instead. Also depending upon the cursor options, rows can be returned as
-        dictionary or named tuple.
+        a dictionary or a tuple.
 
-        Dictionary and namedtuple based cursors are available with buffered output
+        Dictionary based cursors are available with buffered output
         but not raw.
 
         It is possible to also give a custom cursor through the `cursor_class`
         parameter, but it needs to be a subclass of `mysql.connector.cursor.MySQLCursor`
         or `mysql.connector.cursor_cext.CMySQLCursor` according to the type of
         connection that's being used.
+
+        **NOTE: The parameters read and write timeouts in cursors are unsupported for
+        C-Extension.**
 
         Args:
             buffered: If `True`, the cursor fetches all rows from the server after an
@@ -1600,7 +1783,10 @@ class MySQLConnectionAbstract(ABC):
                           or `cursor_cext.CMySQLCursor` according to the type of
                           connection that's being used.
             dictionary: If `True`, the cursor returns rows as dictionaries.
-            named_tuple: If `True`, the cursor returns rows as named tuples.
+            read_timeout: A positive integer representing timeout in seconds for each
+                          attempt to read any data from the server.
+            write_timeout: A positive integer representing timeout in seconds for each
+                           attempt to send any data to the server.
 
         Returns:
             cursor: A cursor object.
@@ -1609,6 +1795,7 @@ class MySQLConnectionAbstract(ABC):
             ProgrammingError: When `cursor_class` is not a subclass of
                               `MySQLCursorAbstract`.
             ValueError: When cursor is not available.
+            InterfaceError: When read_timeout or write_timeout is not a positive integer.
         """
 
     @abstractmethod
@@ -1764,7 +1951,24 @@ class MySQLConnectionAbstract(ABC):
                     cur.execute(f"SET SESSION `{key}` = {value}")
             cur.close()
 
+    @deprecated(DEPRECATED_METHOD_WARNING.format(property_name="converter_class"))
     def set_converter_class(self, convclass: Optional[Type[MySQLConverter]]) -> None:
+        """
+        Sets the converter class to be used.
+
+        Args:
+            convclass: Should be a class overloading methods and members of
+                       `conversion.MySQLConverter`.
+        """
+        self.converter_class = convclass
+
+    @property
+    def converter_class(self) -> Optional[Type[MySQLConverter]]:
+        """Gets the converter class set for the current session."""
+        return self._converter_class
+
+    @converter_class.setter
+    def converter_class(self, convclass: Optional[Type[MySQLConverter]]) -> None:
         """
         Sets the converter class to be used.
 
@@ -1775,7 +1979,7 @@ class MySQLConnectionAbstract(ABC):
         if convclass and issubclass(convclass, MySQLConverterBase):
             charset_name = self._character_set.get_info(self._charset_id)[0]
             self._converter_class = convclass
-            self.converter = convclass(charset_name, self._use_unicode)
+            self.converter = convclass(charset_name, self.use_unicode)
             self.converter.str_fallback = self._converter_str_fallback
         else:
             raise TypeError(
@@ -1789,6 +1993,7 @@ class MySQLConnectionAbstract(ABC):
         columns: Optional[List[DescriptionType]] = None,
         raw: Optional[bool] = None,
         prep_stmt: Optional[CMySQLPrepStmt] = None,
+        **kwargs: Any,
     ) -> Tuple[Optional[RowType], Optional[Dict[str, Any]]]:
         """Retrieves the next row of a query result set.
 
@@ -1819,6 +2024,7 @@ class MySQLConnectionAbstract(ABC):
         columns: Optional[List[DescriptionType]] = None,
         raw: Optional[bool] = None,
         prep_stmt: Optional[CMySQLPrepStmt] = None,
+        **kwargs: Any,
     ) -> Tuple[List[RowType], Optional[Dict[str, Any]]]:
         """Gets all rows returned by the MySQL server.
 
@@ -1865,11 +2071,12 @@ class MySQLConnectionAbstract(ABC):
         raw: Optional[bool] = False,
         buffered: bool = False,
         raw_as_string: bool = False,
+        **kwargs: Any,
     ) -> Optional[Dict[str, Any]]:
         """Sends a query to the MySQL server.
 
-        This method sends the query to the MySQL server and returns the result. To send
-        multiple statements, use the `cmd_query_iter()` method instead.
+        This method sends the query to the MySQL server and returns the result.
+        To **send multiple statements, use the `cmd_query_iter()` method instead**.
 
         The returned dictionary contains information depending on what kind of query
         was executed. If the query is a `SELECT` statement, the result contains
@@ -1878,8 +2085,8 @@ class MySQLConnectionAbstract(ABC):
 
         Errors received from the MySQL server are raised as exceptions.
 
-        Arguments `raw`, `buffered` and `raw_as_string` are only meaningful
-        for `C-ext` connections.
+        **Arguments `raw`, `buffered` and `raw_as_string` are only meaningful
+        for `C-ext` connections**.
 
         Args:
             query: Statement to be executed.
@@ -1895,14 +2102,13 @@ class MySQLConnectionAbstract(ABC):
 
         Returns:
             dictionary: `Result` or `OK packet` information
-
-        Raises:
-            InterfaceError: When multiple results are found.
         """
 
     @abstractmethod
     def cmd_query_iter(
-        self, statements: str
+        self,
+        statements: str,
+        **kwargs: Any,
     ) -> Generator[Mapping[str, Any], None, None]:
         """Sends one or more statements to the MySQL server.
 
@@ -1934,32 +2140,31 @@ class MySQLConnectionAbstract(ABC):
         """
 
     @abstractmethod
-    def cmd_refresh(self, options: int) -> Optional[Dict[str, Any]]:
-        """Sends the Refresh command to the MySQL server.
+    def cmd_refresh(self, options: int) -> Dict[str, Any]:
+        """Send the Refresh command to the MySQL server.
 
-        `WARNING: This MySQL Server functionality is deprecated.`
+        This method sends the Refresh command to the MySQL server. The options
+        argument should be a bitwise value using constants.RefreshOption.
 
-        This method flushes tables or caches, or resets replication server
-        information. The connected user must have the RELOAD privilege.
-
-        The options argument should be a bitmask value constructed using
-        constants from the `constants.RefreshOption` class.
-
-        The result is a dictionary with the OK packet information.
+        Typical usage example:
+            ```
+           RefreshOption = mysql.connector.RefreshOption
+           refresh = RefreshOption.LOG | RefreshOption.INFO
+           cnx.cmd_refresh(refresh)
+           ```
 
         Args:
             options: Bitmask value constructed using constants from
                      the `constants.RefreshOption` class.
 
         Returns:
-            dictionary: OK packet information.
+            A dictionary representing the OK packet got as response when executing
+            the command.
 
-        Examples:
-            ```
-            >>> from mysql.connector import RefreshOption
-            >>> refresh = RefreshOption.LOG | RefreshOption.THREADS
-            >>> cnx.cmd_refresh(refresh)
-            ```
+        Raises:
+            ValueError: If an invalid command `refresh options` is provided.
+            DeprecationWarning: If one of the options is deprecated for the server you
+                                are connecting to.
         """
 
     @abstractmethod
@@ -2100,7 +2305,9 @@ class MySQLConnectionAbstract(ABC):
 
     @abstractmethod
     def cmd_stmt_prepare(
-        self, statement: bytes
+        self,
+        statement: bytes,
+        **kwargs: Any,
     ) -> Union[Mapping[str, Any], CMySQLPrepStmt]:
         """Prepares a MySQL statement.
 
@@ -2125,6 +2332,7 @@ class MySQLConnectionAbstract(ABC):
         data: Sequence[BinaryProtocolType] = (),
         parameters: Sequence = (),
         flags: int = 0,
+        **kwargs: Any,
     ) -> Optional[Union[Dict[str, Any], Tuple]]:
         """Executes a prepared MySQL statement.
 
@@ -2161,7 +2369,11 @@ class MySQLConnectionAbstract(ABC):
         """
 
     @abstractmethod
-    def cmd_stmt_close(self, statement_id: Union[int, CMySQLPrepStmt]) -> None:
+    def cmd_stmt_close(
+        self,
+        statement_id: Union[int, CMySQLPrepStmt],
+        **kwargs: Any,
+    ) -> None:
         """Deallocates a prepared MySQL statement.
 
         Args:
@@ -2174,7 +2386,11 @@ class MySQLConnectionAbstract(ABC):
 
     @abstractmethod
     def cmd_stmt_send_long_data(
-        self, statement_id: Union[int, CMySQLPrepStmt], param_id: int, data: BinaryIO
+        self,
+        statement_id: Union[int, CMySQLPrepStmt],
+        param_id: int,
+        data: BinaryIO,
+        **kwargs: Any,
     ) -> int:
         """Sends data for a column.
 
@@ -2198,7 +2414,11 @@ class MySQLConnectionAbstract(ABC):
         """
 
     @abstractmethod
-    def cmd_stmt_reset(self, statement_id: Union[int, CMySQLPrepStmt]) -> None:
+    def cmd_stmt_reset(
+        self,
+        statement_id: Union[int, CMySQLPrepStmt],
+        **kwargs: Any,
+    ) -> None:
         """Resets data for prepared statement sent as long data.
 
         Args:
@@ -2234,7 +2454,12 @@ class MySQLCursorAbstract(ABC):
     required by the Python Database API Specification v2.0.
     """
 
-    def __init__(self, connection: Optional[MySQLConnectionAbstract] = None) -> None:
+    def __init__(
+        self,
+        connection: Optional[MySQLConnectionAbstract] = None,
+        read_timeout: Optional[int] = None,
+        write_timeout: Optional[int] = None,
+    ) -> None:
         """Defines the MySQL cursor interface."""
 
         self._connection: Optional[MySQLConnectionAbstract] = connection
@@ -2249,7 +2474,7 @@ class MySQLCursorAbstract(ABC):
         self._warnings: Optional[List[WarningType]] = None
         self._warning_count: int = 0
         self._executed: Optional[bytes] = None
-        self._executed_list: List[StrOrBytes] = []
+        self._executed_list: List[bytes] = []
         self._stored_results: List[MySQLCursorAbstract] = []
         self.arraysize: int = 1
         self._binary: bool = False
@@ -2260,6 +2485,15 @@ class MySQLCursorAbstract(ABC):
             None,
             None,
         )
+        self._read_timeout: Optional[int] = read_timeout
+        self._write_timeout: Optional[int] = write_timeout
+
+        # multi statement execution
+        self._stmt_partitions: Optional[Generator[MySQLScriptPartition, None, None]] = (
+            None
+        )
+        self._stmt_partition: Optional[MySQLScriptPartition] = None
+        self._stmt_map_results: bool = False
 
     def __enter__(self) -> MySQLCursorAbstract:
         return self
@@ -2271,6 +2505,98 @@ class MySQLCursorAbstract(ABC):
         traceback: TracebackType,
     ) -> None:
         self.close()
+
+    @property
+    def read_timeout(self) -> Optional[int]:
+        """
+        Gets the cursor context's timeout in seconds for each attempt
+        to read any data from the server.
+
+        `read_timeout` is number of seconds upto which the connector should wait
+        for the server to reply back before raising an ReadTimeoutError. We can set
+        this option to None, which would signal the connector to wait indefinitely
+        till the read operation is completed or stopped abruptly.
+        """
+        return self._read_timeout
+
+    @read_timeout.setter
+    def read_timeout(self, timeout: Optional[int]) -> None:
+        """
+        Sets or updates the cursor context's timeout in seconds for each attempt
+        to read any data from the server.
+
+        `read_timeout` is number of seconds upto which the connector should wait
+        for the server to reply back before raising an ReadTimeoutError. We can set
+        this option to None, which would signal the connector to wait indefinitely
+        till the read operation is completed or stopped abruptly.
+
+        Args:
+            timeout: Accepts a non-negative integer which is the timeout to be set
+                     in seconds or None.
+        Raises:
+            InterfaceError: If a positive integer or None is not passed via the
+                            timeout parameter.
+        Examples:
+            The following will set the read_timeout of the current session to
+            5 seconds:
+            ```
+            >>> cnx = mysql.connector.connect(user='scott')
+            >>> cur = cnx.cursor()
+            >>> cur.read_timeout = 5
+            ```
+        """
+        if timeout is not None:
+            if not isinstance(timeout, int) or timeout < 0:
+                raise InterfaceError(
+                    "Option read_timeout must be a positive integer or None"
+                )
+        self._read_timeout = timeout
+
+    @property
+    def write_timeout(self) -> Optional[int]:
+        """
+        Gets the connection context's timeout in seconds for each attempt
+        to send data to the server.
+
+        `write_timeout` is number of seconds upto which the connector should spend to
+        write to the server before raising an WriteTimeoutError. We can set this option
+        to None, which would signal the connector to wait indefinitely till the write
+        operation is completed or stopped abruptly.
+        """
+        return self._write_timeout
+
+    @write_timeout.setter
+    def write_timeout(self, timeout: Optional[int]) -> None:
+        """
+        Sets or updates the connection context's timeout in seconds for each attempt
+        to send data to the server.
+
+        `write_timeout` is number of seconds upto which the connector should spend to
+        write to the server before raising an WriteTimeoutError. We can set this option
+        to None, which would signal the connector to wait indefinitely till the write
+        operation is completed or stopped abruptly.
+
+        Args:
+            timeout: Accepts a non-negative integer which is the timeout to be set in
+                     seconds or None.
+        Raises:
+            InterfaceError: If a positive integer or None is not passed via the
+                            timeout parameter.
+        Examples:
+            The following will set the write_timeout of the current
+            session to 5 seconds:
+            ```
+            >>> cnx = mysql.connector.connect(user='scott')
+            >>> cur = cnx.cursor()
+            >>> cur.write_timeout = 5
+            ```
+        """
+        if timeout is not None:
+            if not isinstance(timeout, int) or timeout < 0:
+                raise InterfaceError(
+                    "Option write_timeout must be a positive integer or None"
+                )
+        self._write_timeout = timeout
 
     @abstractmethod
     def callproc(
@@ -2342,49 +2668,130 @@ class MySQLCursorAbstract(ABC):
         params: Union[
             Sequence[MySQLConvertibleType], Dict[str, MySQLConvertibleType]
         ] = (),
-        multi: bool = False,
-    ) -> Optional[Generator[MySQLCursorAbstract, None, None]]:
-        """Executes the given operation substituting any markers with the given parameters.
+        map_results: bool = False,
+    ) -> None:
+        """Executes the given operation (a MySQL script) substituting any markers
+        with the given parameters.
 
         For example, getting all rows where id is 5:
         ```
-        >>> cursor.execute("SELECT * FROM t1 WHERE id = %s", (5,))
+        cursor.execute("SELECT * FROM t1 WHERE id = %s", (5,))
         ```
 
-        The `multi` argument should be set to `True` when executing multiple
-        statements in one operation.
+        If you want each single statement in the script to be related
+        to its corresponding result set, you should enable the `map_results`
+        switch - see workflow example below.
 
-        If warnings were generated, and `connection.get_warnings` is `True`, then
-        `self.warnings` will be a list containing these warnings.
+        If the given script uses `DELIMITER` statements (which are not recognized
+        by MySQL Server), the connector will parse such statements to remove them
+        from the script and substitute delimiters as needed. This pre-processing
+        may cause a performance hit when using long scripts. Note that when enabling
+        `map_results`, the script is expected to use `DELIMITER` statements in order
+        to split the script into multiple query strings.
+
+        The following characters are currently not supported by the connector in
+        `DELIMITER` statements: `"`, `'`, #`, `/*` and `*/`.
+
+        If warnings were generated, and `connection.get_warnings` is
+        `True`, then `self.warnings` will be a list containing these
+        warnings.
 
         Args:
-            operation: Operation to be executed.
+            operation: Operation to be executed - it can be a single or a
+                       multi statement.
             params: The parameters found in the tuple or dictionary params are bound
                     to the variables in the operation. Specify variables using `%s` or
                     `%(name)s` parameter style (that is, using format or pyformat style).
-            multi: If `multi` is set to `True`, `execute()` is able to execute multiple
-                   statements specified in the operation string.
+            map_results: It is `False` by default. If `True`, it allows you to know what
+                        statement caused what result set - see workflow example below.
+                        Only relevant when working with multi statements.
 
         Returns:
-            An iterator when `multi` is `True`, otherwise `None`.
+            `None`.
 
-        Raises:
-            InterfaceError: If `multi` is not set and multiple results are found.
-
-        Examples:
-            The following example selects and inserts data in a single `execute()`
-            operation and displays the result of each statement:
+        Example (basic usage):
+            The following example runs many single statements in a
+            single go and loads the corresponding result sets
+            sequentially:
 
             ```
-            >>> operation = 'SELECT 1; INSERT INTO t1 VALUES (); SELECT 2'
-            >>> for result in cursor.execute(operation, multi=True):
-            >>>     if result.with_rows:
-            >>>         print("Rows produced by statement '{}':".format(
-            >>>         result.statement))
-            >>>         print(result.fetchall())
-            >>>     else:
-            >>>         print("Number of rows affected by statement '{}': {}".format(
-            >>>         result.statement, result.rowcount))
+            sql_operation = '''
+            SET @a=1, @b='2024-02-01';
+            SELECT @a, LENGTH('hello'), @b;
+            SELECT @@version;
+            '''
+            with cnx.cursor() as cur:
+                cur.execute(sql_operation)
+
+                result_set = cur.fetchall()
+                # do something with result set
+                ...
+
+                while cur.nextset():
+                    result_set = cur.fetchall()
+                    # do something with result set
+                    ...
+            ```
+
+            In case the operation is a single statement, you may skip the
+            looping section as no more result sets are to be expected.
+
+        Example (statement-result mapping):
+            The following example runs many single statements in a
+            single go and loads the corresponding result sets
+            sequentially. Additionally, each result set gets related
+            to the statement that caused it:
+
+            ```
+            sql_operation = '''
+            SET @a=1, @b='2024-02-01';
+            SELECT @a, LENGTH('hello'), @b;
+            SELECT @@version;
+            '''
+            with cnx.cursor() as cur:
+                cur.execute(sql_operation, map_results=True)
+
+                # statement 1 is `SET @a=1, @b='2024-02-01'`,
+                # result set from statement 1 is `[]` - aka, an empty set.
+                result_set, statement = cur.fetchall(), cur.statement
+                # do something with result set
+                ...
+
+                # 1st call to `nextset()` will laod the result set from statement 2,
+                # statement 2 is `SELECT @a, LENGTH('hello'), @b`,
+                # result set from statement 2 is `[(1, 5, '2024-02-01')]`.
+                #
+                # 2nd call to `nextset()` will laod the result set from statement 3,
+                # statement 3 is `SELECT @@version`,
+                # result set from statement 3 is `[('9.0.0-labs-mrs-8',)]`.
+                #
+                # 3rd call to `nextset()` will return `None` as there are no more sets,
+                # leading to the end of the consumption process of result sets.
+                while cur.nextset():
+                    result_set, statement = cur.fetchall(), cur.statement
+                    # do something with result set
+                    ...
+            ```
+
+            In case the mapping is disabled (`map_results=False`), all result
+            sets get related to the same statement, which is the one provided
+            when calling `execute()`. In other words, the property `statement`
+            will not change as result sets are consumed, which contrasts with
+            the case in which the mapping is enabled. Note that we offer a
+            new fetch-related API command which can be leveraged as a shortcut
+            for consuming result sets - it is equivalent to the previous
+            workflow.
+
+            ```
+            sql_operation = '''
+            SET @a=1, @b='2024-02-01';
+            SELECT @a, LENGTH('hello'), @b;
+            SELECT @@version;
+            '''
+            with cnx.cursor() as cur:
+                cur.execute(sql_operation, map_results=True)
+                for statement, result_set in cur.fetchsets():
+                    # do something with result set
             ```
         """
 
@@ -2395,7 +2802,7 @@ class MySQLCursorAbstract(ABC):
         seq_params: Sequence[
             Union[Sequence[MySQLConvertibleType], Dict[str, MySQLConvertibleType]]
         ],
-    ) -> Optional[Generator[MySQLCursorAbstract, None, None]]:
+    ) -> None:
         """Executes the given operation multiple times.
 
         The `executemany()` method will execute the operation iterating
@@ -2483,6 +2890,83 @@ class MySQLCursorAbstract(ABC):
             ```
         """
 
+    def fetchsets(
+        self,
+    ) -> Generator[
+        tuple[Optional[str], list[Union[RowType, Dict[str, RowItemType]]]], None, None
+    ]:
+        """Generates the result sets stream caused by the last `execute*()`.
+
+        Returns:
+            A 2-tuple; the first element is the statement that caused the
+            result set, and the second is the result set itself.
+
+            This method is used as part of the multi statement
+            execution workflow - see example below.
+
+        Example:
+            Consider the following example where multiple statements are executed in one
+            go:
+
+            ```
+                sql_operation = '''
+                SET @a=1, @b='2024-02-01';
+                SELECT @a, LENGTH('hello'), @b;
+                SELECT @@version;
+                '''
+                with cnx.cursor() as cur:
+                    cur.execute(sql_operation, map_results=True)
+
+                    result_set, statement = cur.fetchall(), cur.statement
+                    # do something with result set
+                    ...
+
+                    while cur.nextset():
+                        result_set, statement = cur.fetchall(), cur.statement
+                        # do something with result set
+                        ...
+            ```
+
+            In this case, as an alternative to loading the result sets with `nextset()`
+            in combination with a `while` loop, you can use `fetchsets()` which is
+            equivalent to the previous approach:
+
+            ```
+                sql_operation = '''
+                SET @a=1, @b='2024-02-01';
+                SELECT @a, LENGTH('hello'), @b;
+                SELECT @@version;
+                '''
+                with cnx.cursor() as cur:
+                    cur.execute(sql_operation)
+                    for statement, result_set in cur.fetchsets():
+                        # do something with result set
+            ```
+        """
+        # Some cursor flavor such as `buffered` raise an exception when they don't have
+        # result sets to fetch from.
+        # Some others, such as `dictionary` or `raw`, return an empty result set
+        # under the same circumstances.
+        statement_cached = None
+        if not self._stmt_map_results:
+            statement_cached = self.statement
+
+        try:
+            result_set = self.fetchall()
+        except InterfaceError:
+            result_set = []
+        yield (
+            self.statement if self._stmt_map_results else statement_cached
+        ), result_set
+        while self.nextset():
+            try:
+                result_set = self.fetchall()
+            except InterfaceError:
+                result_set = []
+            yield (
+                self.statement if self._stmt_map_results else statement_cached
+            ), result_set
+
     @abstractmethod
     def stored_results(self) -> Iterator[MySQLCursorAbstract]:
         """Returns an iterator (of MySQLCursorAbstract subclass instances) for stored results.
@@ -2503,8 +2987,46 @@ class MySQLCursorAbstract(ABC):
             ```
         """
 
-    def nextset(self) -> NoReturn:
-        """Not Implemented."""
+    @abstractmethod
+    def nextset(self) -> Optional[bool]:
+        """Makes the cursor skip to the next available set, discarding
+        any remaining rows from the current set.
+
+        This method is used as part of the multi statement
+        execution workflow - see example below.
+
+        Returns:
+            It returns `None` if there are no more sets. Otherwise, it returns
+            `True` and subsequent calls to the `fetch*()` methods will return
+            rows from the next result set.
+
+        Example:
+            The following example runs many single statements in a
+            single go and loads the corresponding result sets
+            sequentially:
+
+            ```
+            sql_operation = '''
+            SET @a=1, @b='2024-02-01';
+            SELECT @a, LENGTH('hello'), @b;
+            SELECT @@version;
+            '''
+            with cnx.cursor() as cur:
+                cur.execute(sql_operation)
+
+                result_set = cur.fetchall()
+                # do something with result set
+                ...
+
+                while cur.nextset():
+                    result_set = cur.fetchall()
+                    # do something with result set
+                    ...
+            ```
+
+            In case the operation is a single statement, you may skip the
+            looping section as no more result sets are to be expected.
+        """
 
     def setinputsizes(self, sizes: Any) -> NoReturn:
         """Not Implemented."""
@@ -2574,7 +3096,7 @@ class MySQLCursorAbstract(ABC):
 
     @property
     def warnings(self) -> Optional[List[WarningType]]:
-        """Returns a list of tuples (WarningType) containing warnings generated
+        """Gets a list of tuples (WarningType) containing warnings generated
         by the previously executed operation.
 
         Examples:
@@ -2600,6 +3122,24 @@ class MySQLCursorAbstract(ABC):
         """
         return self._warning_count
 
+    @property
+    def statement(self) -> Optional[str]:
+        """Returns the latest executed statement.
+
+        When a multiple statement is executed, the value of `statement`
+        corresponds to the one that caused the current result set, provided
+        the statement-result mapping was enabled. Otherwise, the value of
+        `statement` matches the statement just as provided when calling
+        `execute()` and it does not change as result sets are traversed.
+        """
+        if self._executed is None:
+            return None
+        try:
+            return self._executed.strip().decode("utf-8")
+        except (AttributeError, UnicodeDecodeError):
+            return cast(str, self._executed.strip())
+
+    @deprecated(DEPRECATED_METHOD_WARNING.format(property_name="warnings"))
     def fetchwarnings(self) -> Optional[List[WarningType]]:
         """Returns a list of tuples (WarningType) containing warnings generated by
         the previously executed operation.

@@ -1,4 +1,4 @@
-# Copyright (c) 2009, 2024, Oracle and/or its affiliates.
+# Copyright (c) 2009, 2025, Oracle and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0, as
@@ -69,6 +69,8 @@ DEFAULT_CONFIGURATION: Dict[str, Optional[Union[str, bool, int]]] = {
     "get_warnings": False,
     "raise_on_warnings": False,
     "connection_timeout": None,
+    "read_timeout": None,
+    "write_timeout": None,
     "client_flags": 0,
     "compress": False,
     "buffered": False,
@@ -118,17 +120,9 @@ CONN_ATTRS_DN: Tuple[str, ...] = (
     "_connector_version",
 )
 
-# List of deprecated cursor class names
-DEPRECATED_CURSOR_CLASS_NAMES: Tuple[str, ...] = (
-    "MySQLCursorPreparedRaw",
-    "MySQLCursorNamedTuple",
-    "MySQLCursorBufferedNamedTuple",
-    "MySQLCursorPreparedNamedTuple",
-    "CMySQLCursorPreparedRaw",
-    "CMySQLCursorNamedTuple",
-    "CMySQLCursorBufferedNamedTuple",
-    "CMySQLCursorPreparedNamedTuple",
-)
+DEPRECATED_METHOD_WARNING: str = """
+    The property counterpart '{property_name}' should be used instead.
+"""
 
 TLS_VERSIONS: List[str] = APPROVED_TLS_VERSIONS + DEPRECATED_TLS_VERSIONS
 """Accepted TLS versions. A warning is raised when using a deprecated version."""
@@ -316,28 +310,6 @@ def _obsolete_option(name: str, new_name: str, value: int) -> int:
         category=DeprecationWarning,
     )
     return value
-
-
-def raise_warning_against_deprecated_cursor_class(
-    cursor_name: str,
-) -> None:
-    """Raise a deprecation warning if the cursor class name matches against
-    any of DEPRECATED_CURSOR_CLASS_NAMES list.
-
-    Args:
-        cursor_name (str):  cursor class name to be checked against
-                            DEPRECATED_CURSOR_CLASS_NAMES list.
-    Returns:
-        None
-    """
-    if cursor_name in DEPRECATED_CURSOR_CLASS_NAMES:
-        warnings.warn(
-            message=f"WARNING: Cursor type {cursor_name} is now "
-            "deprecated and will be removed in a future release of "
-            "MySQL Connector/Python.",
-            category=DeprecationWarning,
-            stacklevel=3,
-        )
 
 
 class _Constants(ABC):

@@ -17,15 +17,17 @@ import logging
 import os
 import shutil
 import traceback
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import suppress
 from enum import Enum
 from inspect import cleandoc
 from itertools import chain, starmap
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Iterable, Iterator, Mapping, Protocol, TypeVar, cast
+from types import TracebackType
+from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
-from .. import Command, _normalization, _path, errors, namespaces
+from .. import Command, _normalization, _path, _shutil, errors, namespaces
 from .._path import StrPath
 from ..compat import py312
 from ..discovery import find_package_path
@@ -118,13 +120,13 @@ class editable_wheel(Command):
         self.project_dir = None
         self.mode = None
 
-    def finalize_options(self):
+    def finalize_options(self) -> None:
         dist = self.distribution
         self.project_dir = dist.src_root or os.curdir
         self.package_dir = dist.package_dir or {}
         self.dist_dir = Path(self.dist_dir or os.path.join(self.project_dir, "dist"))
 
-    def run(self):
+    def run(self) -> None:
         try:
             self.dist_dir.mkdir(exist_ok=True)
             self._ensure_dist_info()
@@ -276,7 +278,7 @@ class editable_wheel(Command):
         This method implements a temporary workaround to support the ecosystem
         while the implementations catch up.
         """
-        # TODO: Once plugins/customisations had the chance to catch up, replace
+        # TODO: Once plugins/customizations had the chance to catch up, replace
         #       `self._run_build_subcommands()` with `self.run_command("build")`.
         #       Also remove _safely_run, TestCustomBuildPy. Suggested date: Aug/2023.
         build = self.get_finalized_command("build")
@@ -307,7 +309,7 @@ class editable_wheel(Command):
                 https://setuptools.pypa.io/en/latest/userguide/extension.html.
 
                 For the time being `setuptools` will silence this error and ignore
-                the faulty command, but this behaviour will change in future versions.
+                the faulty command, but this behavior will change in future versions.
                 """,
                 # TODO: define due_date
                 # There is a series of shortcomings with the available editable install
@@ -379,18 +381,18 @@ class editable_wheel(Command):
 class EditableStrategy(Protocol):
     def __call__(
         self, wheel: WheelFile, files: list[str], mapping: Mapping[str, str]
-    ): ...
+    ) -> object: ...
     def __enter__(self) -> Self: ...
     def __exit__(
         self,
-        _exc_type: object,
-        _exc_value: object,
-        _traceback: object,
+        _exc_type: type[BaseException] | None,
+        _exc_value: BaseException | None,
+        _traceback: TracebackType | None,
     ) -> object: ...
 
 
 class _StaticPth:
-    def __init__(self, dist: Distribution, name: str, path_entries: list[Path]):
+    def __init__(self, dist: Distribution, name: str, path_entries: list[Path]) -> None:
         self.dist = dist
         self.name = name
         self.path_entries = path_entries
@@ -434,7 +436,7 @@ class _LinkTree(_StaticPth):
         name: str,
         auxiliary_dir: StrPath,
         build_lib: StrPath,
-    ):
+    ) -> None:
         self.auxiliary_dir = Path(auxiliary_dir)
         self.build_lib = Path(build_lib).resolve()
         self._file = dist.get_command_obj("build_py").copy_file
@@ -494,7 +496,7 @@ class _LinkTree(_StaticPth):
 
 
 class _TopLevelFinder:
-    def __init__(self, dist: Distribution, name: str):
+    def __init__(self, dist: Distribution, name: str) -> None:
         self.dist = dist
         self.name = name
 
@@ -504,7 +506,7 @@ class _TopLevelFinder:
         package_dir = self.dist.package_dir or {}
         roots = _find_package_roots(top_level, package_dir, src_root)
 
-        namespaces_: dict[str, list[str]] = dict(
+        namespaces_ = dict(
             chain(
                 _find_namespaces(self.dist.packages or [], roots),
                 ((ns, []) for ns in _find_virtual_namespaces(roots)),
@@ -562,7 +564,7 @@ def _encode_pth(content: str) -> bytes:
     .pth files are always read with 'locale' encoding, the recommendation
     from the cpython core developers is to write them as ``open(path, "w")``
     and ignore warnings (see python/cpython#77102, pypa/setuptools#3937).
-    This function tries to simulate this behaviour without having to create an
+    This function tries to simulate this behavior without having to create an
     actual file, in a way that supports a range of active Python versions.
     (There seems to be some variety in the way different version of Python handle
     ``encoding=None``, not all of them use ``locale.getpreferredencoding(False)``
@@ -771,18 +773,18 @@ def _is_nested(pkg: str, pkg_path: str, parent: str, parent_path: str) -> bool:
 
 def _empty_dir(dir_: _P) -> _P:
     """Create a directory ensured to be empty. Existing files may be removed."""
-    shutil.rmtree(dir_, ignore_errors=True)
+    _shutil.rmtree(dir_, ignore_errors=True)
     os.makedirs(dir_)
     return dir_
 
 
 class _NamespaceInstaller(namespaces.Installer):
-    def __init__(self, distribution, installation_dir, editable_name, src_root):
+    def __init__(self, distribution, installation_dir, editable_name, src_root) -> None:
         self.distribution = distribution
         self.src_root = src_root
         self.installation_dir = installation_dir
         self.editable_name = editable_name
-        self.outputs = []
+        self.outputs: list[str] = []
         self.dry_run = False
 
     def _get_nspkg_file(self):
